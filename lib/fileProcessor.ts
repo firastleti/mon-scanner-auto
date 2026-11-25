@@ -43,11 +43,11 @@ async function processImageFile(file: File): Promise<ProcessedUpload> {
   const normalizedFile = await convertHeicIfNeeded(file);
 
   const compressedFile = await imageCompression(normalizedFile, {
-    maxSizeMB: 1.2,
-    maxWidthOrHeight: 1600,
+    maxSizeMB: 1.0,
+    maxWidthOrHeight: 1280,
     useWebWorker: true,
     fileType: 'image/jpeg',
-    initialQuality: 0.8,
+    initialQuality: 0.78,
   });
 
   const imageDataUrl = await imageCompression.getDataUrlFromFile(compressedFile);

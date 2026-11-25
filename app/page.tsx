@@ -441,7 +441,6 @@ export default function HomePage() {
               </span>
             </div>
 
-            {/* Garde-fou Post-OCR : Confirmation manuelle si confiance faible ou anomalie compteur */}
             {evaluation.postOcrValidation.needsManualConfirmation && (
               <form
                 onSubmit={handleApplyManualCorrection}
