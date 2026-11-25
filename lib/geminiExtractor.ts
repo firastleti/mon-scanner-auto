@@ -188,8 +188,8 @@ export async function extractVehicleData(input: {
 
   contents.push(promptText);
 
-  const primaryModel = process.env.GEMINI_MODEL || 'gemini-2.5-flash-lite';
-  const fallbackModels = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'].filter(
+  const primaryModel = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
+  const fallbackModels = ['gemini-3.5-flash-lite', 'gemini-3.5-flash'].filter(
     (m) => m !== primaryModel
   );
   const modelsToTry = [primaryModel, ...fallbackModels];
