@@ -1,20 +1,21 @@
 import imageCompression from 'browser-image-compression';
 
-export interface ProcessedUpload {
-  kind: 'image' | 'pdf';
-  fileName: string;
-  imageDataUrl?: string;
-  previewUrl?: string;
-  sizeKb: number;
-  pdfText?: string;
-  pdfPageCount?: number;
-}
+export type ProcessedUpload =
+  | {
+      kind: 'image';
+      fileName: string;
+      sizeKb: number;
+      imageDataUrl: string;
+    }
+  | {
+      kind: 'pdf';
+      fileName: string;
+      sizeKb: number;
+      pdfText: string;
+      pdfPageCount: number;
+    };
 
-const MAX_HEIC_BYTES = 25 * 1024 * 1024;
-const MAX_PDF_BYTES = 20 * 1024 * 1024;
-const MAX_DIMENSION = 1024;
-
-async function convertHeicIfNeeded(file: File): Promise<File> {
+export async function normalizeMobileFile(file: File): Promise<File> {
   const isHeic =
     file.type === 'image/heic' ||
     file.type === 'image/heif' ||
@@ -22,163 +23,107 @@ async function convertHeicIfNeeded(file: File): Promise<File> {
 
   if (!isHeic) return file;
 
-  if (file.size > MAX_HEIC_BYTES) {
+  // Garde-fou OOM mobile : rejeter les fichiers HEIC/RAW massifs (> 25 Mo)
+  if (file.size > 25 * 1024 * 1024) {
     throw new Error(
-      'Cette photo HEIC est trop lourde (> 25 Mo). Réduis sa résolution ou envoie une capture d’écran.'
+      'Fichier HEIC trop volumineux (> 25 Mo). Compresse-le ou capture une photo plus légère.'
     );
   }
 
   const heic2any = (await import('heic2any')).default;
-  const converted = await heic2any({
+  const convertedBlob = await heic2any({
     blob: file,
     toType: 'image/jpeg',
-    quality: 0.72,
+    quality: 0.75,
   });
 
-  const blob = Array.isArray(converted) ? converted[0] : converted;
-  const jpegName = file.name.replace(/\.(heic|heif)$/i, '.jpg');
-
-  return new File([blob], jpegName, { type: 'image/jpeg' });
+  const singleBlob = Array.isArray(convertedBlob) ? convertedBlob[0] : convertedBlob;
+  return new File([singleBlob], file.name.replace(/\.(heic|heif)$/i, '.jpg'), {
+    type: 'image/jpeg',
+  });
 }
 
-function downscaleImageToBlobAndDataUrl(
-  file: File,
-  maxDim: number
-): Promise<{ blob: Blob; dataUrl: string; approxBytes: number }> {
+function blobToDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
-    const objectUrl = URL.createObjectURL(file);
-    const img = new Image();
-
-    img.onload = () => {
-      try {
-        let { width, height } = img;
-        if (width > maxDim || height > maxDim) {
-          const ratio = Math.min(maxDim / width, maxDim / height);
-          width = Math.max(1, Math.round(width * ratio));
-          height = Math.max(1, Math.round(height * ratio));
-        }
-
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          URL.revokeObjectURL(objectUrl);
-          reject(new Error('Impossible d’initialiser le contexte canvas.'));
-          return;
-        }
-
-        ctx.drawImage(img, 0, 0, width, height);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.72);
-        const approxBytes = Math.round((dataUrl.length * 3) / 4);
-
-        canvas.toBlob(
-          (blob) => {
-            URL.revokeObjectURL(objectUrl);
-            if (!blob) {
-              reject(new Error('Impossible de générer le aperçu image.'));
-              return;
-            }
-            resolve({ blob, dataUrl, approxBytes });
-          },
-          'image/jpeg',
-          0.72
-        );
-      } catch (err) {
-        URL.revokeObjectURL(objectUrl);
-        reject(err);
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        resolve(reader.result);
+      } else {
+        reject(new Error('Impossible de lire le fichier image.'));
       }
     };
-
-    img.onerror = () => {
-      URL.revokeObjectURL(objectUrl);
-      reject(new Error('Impossible de lire l’image sélectionnée.'));
-    };
-
-    img.src = objectUrl;
+    reader.onerror = () => reject(new Error('Erreur de lecture du fichier.'));
+    reader.readAsDataURL(blob);
   });
 }
 
-async function processImageFile(file: File): Promise<ProcessedUpload> {
-  const normalizedFile = await convertHeicIfNeeded(file);
-
-  try {
-    const { blob, dataUrl, approxBytes } = await downscaleImageToBlobAndDataUrl(
-      normalizedFile,
-      MAX_DIMENSION
-    );
-    const previewUrl = URL.createObjectURL(blob);
-
-    return {
-      kind: 'image',
-      fileName: normalizedFile.name.replace(/\.(heic|heif)$/i, '.jpg'),
-      imageDataUrl: dataUrl,
-      previewUrl,
-      sizeKb: Math.max(1, Math.round(approxBytes / 1024)),
-    };
-  } catch {
-    const compressedFile = await imageCompression(normalizedFile, {
-      maxSizeMB: 0.8,
-      maxWidthOrHeight: MAX_DIMENSION,
-      useWebWorker: false,
-      fileType: 'image/jpeg',
-      initialQuality: 0.72,
-    });
-
-    const imageDataUrl = await imageCompression.getDataUrlFromFile(compressedFile);
-    const previewUrl = URL.createObjectURL(compressedFile);
-
-    return {
-      kind: 'image',
-      fileName: compressedFile.name,
-      imageDataUrl,
-      previewUrl,
-      sizeKb: Math.max(1, Math.round(compressedFile.size / 1024)),
-    };
-  }
-}
-
-async function processPdfFile(file: File): Promise<ProcessedUpload> {
-  if (file.size > MAX_PDF_BYTES) {
-    throw new Error('Ce fichier PDF dépasse 20 Mo.');
-  }
-
+async function extractTextFromPdf(file: File): Promise<{
+  text: string;
+  pageCount: number;
+}> {
   const pdfjsLib = await import('pdfjs-dist');
 
-  if (typeof window !== 'undefined' && !pdfjsLib.GlobalWorkerOptions.workerSrc) {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-      'pdfjs-dist/build/pdf.worker.min.mjs',
-      import.meta.url
-    ).toString();
+  if (typeof window !== 'undefined' && pdfjsLib.GlobalWorkerOptions) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
   }
 
   const arrayBuffer = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+  const pdf = await loadingTask.promise;
+  const pageCount = pdf.numPages;
 
-  let fullText = '';
-  for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-    const page = await pdf.getPage(pageNum);
+  const pagesText: string[] = [];
+  const maxPages = Math.min(pageCount, 20);
+
+  for (let i = 1; i <= maxPages; i++) {
+    const page = await pdf.getPage(i);
     const content = await page.getTextContent();
-    const pageStrings = content.items
+    const strings = content.items
       .map((item) => ('str' in item ? item.str : ''))
       .filter(Boolean);
-    fullText += `\n--- Page ${pageNum} ---\n` + pageStrings.join(' ');
+    pagesText.push(`--- Page ${i} ---\n${strings.join(' ')}`);
   }
 
   return {
-    kind: 'pdf',
-    fileName: file.name,
-    sizeKb: Math.max(1, Math.round(file.size / 1024)),
-    pdfText: fullText.trim(),
-    pdfPageCount: pdf.numPages,
+    text: pagesText.join('\n\n'),
+    pageCount,
   };
 }
 
 export async function processUploadedFile(file: File): Promise<ProcessedUpload> {
-  const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+  const isPdf =
+    file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+
   if (isPdf) {
-    return processPdfFile(file);
+    const { text, pageCount } = await extractTextFromPdf(file);
+    const sizeKb = Math.max(1, Math.round(file.size / 1024));
+    return {
+      kind: 'pdf',
+      fileName: file.name,
+      sizeKb,
+      pdfText: text,
+      pdfPageCount: pageCount,
+    };
   }
-  return processImageFile(file);
+
+  const normalizedFile = await normalizeMobileFile(file);
+
+  const compressedFile = await imageCompression(normalizedFile, {
+    maxSizeMB: 1.2,
+    maxWidthOrHeight: 1600,
+    useWebWorker: true,
+    fileType: 'image/jpeg',
+    initialQuality: 0.82,
+  });
+
+  const imageDataUrl = await blobToDataUrl(compressedFile);
+  const sizeKb = Math.max(1, Math.round(compressedFile.size / 1024));
+
+  return {
+    kind: 'image',
+    fileName: normalizedFile.name,
+    sizeKb,
+    imageDataUrl,
+  };
 }
