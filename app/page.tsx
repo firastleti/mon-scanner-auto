@@ -407,9 +407,9 @@ export default function HomePage() {
 
         {result && (
           <div className="rounded-xl bg-slate-950 border border-slate-800 p-4 space-y-2 text-sm">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-slate-400">Fichier :</span>
-              <span className="font-mono text-xs sm:text-sm truncate">
+            <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-1 sm:gap-3">
+              <span className="text-slate-400 shrink-0">Fichier :</span>
+              <span className="font-mono text-xs sm:text-sm break-all sm:break-normal sm:truncate">
                 {result.fileName} ({result.sizeKb} Ko)
               </span>
             </div>
