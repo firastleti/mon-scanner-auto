@@ -72,8 +72,6 @@ export default function HomePage() {
   const [loadingAi, setLoadingAi] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ProcessedUpload | null>(null);
-  const [showMobilePreview, setShowMobilePreview] = useState(false);
-  const [previewFailed, setPreviewFailed] = useState(false);
   const [extraNotes, setExtraNotes] = useState('');
   const [extraction, setExtraction] = useState<VehicleExtraction | null>(null);
   const [evaluation, setEvaluation] = useState<EngineEvaluationResult | null>(null);
@@ -95,14 +93,6 @@ export default function HomePage() {
   const [loadingMagic, setLoadingMagic] = useState(false);
   const [magicUrl, setMagicUrl] = useState<string | null>(null);
   const [restoredBanner, setRestoredBanner] = useState<string | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (result?.previewUrl) {
-        URL.revokeObjectURL(result.previewUrl);
-      }
-    };
-  }, [result?.previewUrl]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -161,13 +151,7 @@ export default function HomePage() {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (result?.previewUrl) {
-      URL.revokeObjectURL(result.previewUrl);
-    }
-
     resetAnalysisStates();
-    setShowMobilePreview(false);
-    setPreviewFailed(false);
     setResult(null);
     setLoadingFile(true);
 
@@ -270,9 +254,6 @@ export default function HomePage() {
   }
 
   async function handleRunDemo() {
-    if (result?.previewUrl) {
-      URL.revokeObjectURL(result.previewUrl);
-    }
     resetAnalysisStates();
     setResult(null);
     setExtraNotes(DEMO_SCENARIO.notes);
@@ -351,8 +332,6 @@ export default function HomePage() {
     ? getHingeBadge(evaluation.matchedEngine.hingeStatus)
     : null;
 
-  const activePreviewSrc = result?.previewUrl || result?.imageDataUrl;
-
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100 p-4 sm:p-6 flex flex-col items-center justify-center">
       <div className="w-full max-w-2xl rounded-2xl border border-slate-800 bg-slate-900 p-5 sm:p-6 space-y-5">
@@ -428,41 +407,19 @@ export default function HomePage() {
 
         {result && (
           <div className="rounded-xl bg-slate-950 border border-slate-800 p-4 space-y-2 text-sm">
-            <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-1 sm:gap-3">
-              <span className="text-slate-400 shrink-0">Fichier :</span>
-              <span className="font-mono text-xs sm:text-sm break-all sm:break-normal sm:truncate">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-slate-400">Fichier :</span>
+              <span className="font-mono text-xs sm:text-sm truncate">
                 {result.fileName} ({result.sizeKb} Ko)
               </span>
             </div>
-
-            {result.kind === 'image' && activePreviewSrc && !previewFailed && (
-              <>
-                <div className="sm:hidden pt-1">
-                  <button
-                    type="button"
-                    onClick={() => setShowMobilePreview((prev) => !prev)}
-                    className="text-xs px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 cursor-pointer"
-                  >
-                    {showMobilePreview ? 'Masquer l’aperçu' : 'Afficher l’aperçu'}
-                  </button>
-                </div>
-                <img
-                  src={activePreviewSrc}
-                  alt="Aperçu compressé"
-                  onError={() => setPreviewFailed(true)}
-                  className={`${
-                    showMobilePreview ? 'block' : 'hidden'
-                  } sm:block mt-2 max-h-48 w-full object-contain rounded-lg border border-slate-800`}
-                />
-              </>
+            {result.kind === 'image' && result.imageDataUrl && (
+              <img
+                src={result.imageDataUrl}
+                alt="Aperçu compressé"
+                className="mt-2 max-h-48 w-full object-contain rounded-lg border border-slate-800"
+              />
             )}
-
-            {result.kind === 'image' && previewFailed && (
-              <p className="text-xs text-slate-400">
-                Aperçu visuel masqué — image prête pour l’analyse.
-              </p>
-            )}
-
             {result.kind === 'pdf' && (
               <p className="text-xs text-slate-400">
                 PDF analysé : {result.pdfPageCount ?? 1} page(s)
