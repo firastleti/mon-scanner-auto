@@ -11,6 +11,7 @@ export interface ProcessedUpload {
 
 const MAX_HEIC_BYTES = 25 * 1024 * 1024;
 const MAX_PDF_BYTES = 20 * 1024 * 1024;
+const MAX_DIMENSION = 1024;
 
 async function convertHeicIfNeeded(file: File): Promise<File> {
   const isHeic =
@@ -30,7 +31,7 @@ async function convertHeicIfNeeded(file: File): Promise<File> {
   const converted = await heic2any({
     blob: file,
     toType: 'image/jpeg',
-    quality: 0.75,
+    quality: 0.72,
   });
 
   const blob = Array.isArray(converted) ? converted[0] : converted;
@@ -39,25 +40,87 @@ async function convertHeicIfNeeded(file: File): Promise<File> {
   return new File([blob], jpegName, { type: 'image/jpeg' });
 }
 
+async function downscaleImageDataUrl(
+  file: File,
+  maxDim: number
+): Promise<{ dataUrl: string; approxBytes: number }> {
+  return new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file);
+    const img = new Image();
+
+    img.onload = () => {
+      try {
+        let { width, height } = img;
+        if (width > maxDim || height > maxDim) {
+          const ratio = Math.min(maxDim / width, maxDim / height);
+          width = Math.max(1, Math.round(width * ratio));
+          height = Math.max(1, Math.round(height * ratio));
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          URL.revokeObjectURL(objectUrl);
+          reject(new Error('Impossible d’initialiser le contexte canvas.'));
+          return;
+        }
+
+        ctx.drawImage(img, 0, 0, width, height);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.72);
+        const approxBytes = Math.round((dataUrl.length * 3) / 4);
+
+        URL.revokeObjectURL(objectUrl);
+        resolve({ dataUrl, approxBytes });
+      } catch (err) {
+        URL.revokeObjectURL(objectUrl);
+        reject(err);
+      }
+    };
+
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error('Impossible de lire l’image sélectionnée.'));
+    };
+
+    img.src = objectUrl;
+  });
+}
+
 async function processImageFile(file: File): Promise<ProcessedUpload> {
   const normalizedFile = await convertHeicIfNeeded(file);
 
-  const compressedFile = await imageCompression(normalizedFile, {
-    maxSizeMB: 1.0,
-    maxWidthOrHeight: 1280,
-    useWebWorker: true,
-    fileType: 'image/jpeg',
-    initialQuality: 0.78,
-  });
+  try {
+    const { dataUrl, approxBytes } = await downscaleImageDataUrl(
+      normalizedFile,
+      MAX_DIMENSION
+    );
+    return {
+      kind: 'image',
+      fileName: normalizedFile.name.replace(/\.(heic|heif)$/i, '.jpg'),
+      imageDataUrl: dataUrl,
+      sizeKb: Math.max(1, Math.round(approxBytes / 1024)),
+    };
+  } catch {
+    const compressedFile = await imageCompression(normalizedFile, {
+      maxSizeMB: 0.8,
+      maxWidthOrHeight: MAX_DIMENSION,
+      useWebWorker: false,
+      fileType: 'image/jpeg',
+      initialQuality: 0.72,
+    });
 
-  const imageDataUrl = await imageCompression.getDataUrlFromFile(compressedFile);
+    const imageDataUrl = await imageCompression.getDataUrlFromFile(compressedFile);
 
-  return {
-    kind: 'image',
-    fileName: compressedFile.name,
-    imageDataUrl,
-    sizeKb: Math.round(compressedFile.size / 1024),
-  };
+    return {
+      kind: 'image',
+      fileName: compressedFile.name,
+      imageDataUrl,
+      sizeKb: Math.max(1, Math.round(compressedFile.size / 1024)),
+    };
+  }
 }
 
 async function processPdfFile(file: File): Promise<ProcessedUpload> {
@@ -90,7 +153,7 @@ async function processPdfFile(file: File): Promise<ProcessedUpload> {
   return {
     kind: 'pdf',
     fileName: file.name,
-    sizeKb: Math.round(file.size / 1024),
+    sizeKb: Math.max(1, Math.round(file.size / 1024)),
     pdfText: fullText.trim(),
     pdfPageCount: pdf.numPages,
   };

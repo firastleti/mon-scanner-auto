@@ -72,6 +72,7 @@ export default function HomePage() {
   const [loadingAi, setLoadingAi] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ProcessedUpload | null>(null);
+  const [previewFailed, setPreviewFailed] = useState(false);
   const [extraNotes, setExtraNotes] = useState('');
   const [extraction, setExtraction] = useState<VehicleExtraction | null>(null);
   const [evaluation, setEvaluation] = useState<EngineEvaluationResult | null>(null);
@@ -152,6 +153,7 @@ export default function HomePage() {
     if (!file) return;
 
     resetAnalysisStates();
+    setPreviewFailed(false);
     setResult(null);
     setLoadingFile(true);
 
@@ -413,12 +415,18 @@ export default function HomePage() {
                 {result.fileName} ({result.sizeKb} Ko)
               </span>
             </div>
-            {result.kind === 'image' && result.imageDataUrl && (
+            {result.kind === 'image' && result.imageDataUrl && !previewFailed && (
               <img
                 src={result.imageDataUrl}
                 alt="Aperçu compressé"
-                className="mt-2 max-h-48 w-full object-contain rounded-lg border border-slate-800"
+                onError={() => setPreviewFailed(true)}
+                className="mt-2 max-h-48 w-full object-contain rounded-lg border border-slate-800 bg-slate-900"
               />
+            )}
+            {result.kind === 'image' && previewFailed && (
+              <p className="text-xs text-slate-400">
+                Aperçu visuel masqué pour préserver la mémoire mobile — image prête pour l’analyse.
+              </p>
             )}
             {result.kind === 'pdf' && (
               <p className="text-xs text-slate-400">
