@@ -413,13 +413,6 @@ export default function HomePage() {
                 {result.fileName} ({result.sizeKb} Ko)
               </span>
             </div>
-            {result.kind === 'image' && result.imageDataUrl && (
-              <img
-                src={result.imageDataUrl}
-                alt="Aperçu compressé"
-                className="mt-2 max-h-48 w-full object-contain rounded-lg border border-slate-800"
-              />
-            )}
             {result.kind === 'pdf' && (
               <p className="text-xs text-slate-400">
                 PDF analysé : {result.pdfPageCount ?? 1} page(s)
