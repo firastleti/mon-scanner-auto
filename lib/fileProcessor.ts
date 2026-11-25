@@ -4,6 +4,7 @@ export interface ProcessedUpload {
   kind: 'image' | 'pdf';
   fileName: string;
   imageDataUrl?: string;
+  previewUrl?: string;
   sizeKb: number;
   pdfText?: string;
   pdfPageCount?: number;
@@ -40,10 +41,10 @@ async function convertHeicIfNeeded(file: File): Promise<File> {
   return new File([blob], jpegName, { type: 'image/jpeg' });
 }
 
-async function downscaleImageDataUrl(
+function downscaleImageToBlobAndDataUrl(
   file: File,
   maxDim: number
-): Promise<{ dataUrl: string; approxBytes: number }> {
+): Promise<{ blob: Blob; dataUrl: string; approxBytes: number }> {
   return new Promise((resolve, reject) => {
     const objectUrl = URL.createObjectURL(file);
     const img = new Image();
@@ -72,8 +73,18 @@ async function downscaleImageDataUrl(
         const dataUrl = canvas.toDataURL('image/jpeg', 0.72);
         const approxBytes = Math.round((dataUrl.length * 3) / 4);
 
-        URL.revokeObjectURL(objectUrl);
-        resolve({ dataUrl, approxBytes });
+        canvas.toBlob(
+          (blob) => {
+            URL.revokeObjectURL(objectUrl);
+            if (!blob) {
+              reject(new Error('Impossible de générer le aperçu image.'));
+              return;
+            }
+            resolve({ blob, dataUrl, approxBytes });
+          },
+          'image/jpeg',
+          0.72
+        );
       } catch (err) {
         URL.revokeObjectURL(objectUrl);
         reject(err);
@@ -93,14 +104,17 @@ async function processImageFile(file: File): Promise<ProcessedUpload> {
   const normalizedFile = await convertHeicIfNeeded(file);
 
   try {
-    const { dataUrl, approxBytes } = await downscaleImageDataUrl(
+    const { blob, dataUrl, approxBytes } = await downscaleImageToBlobAndDataUrl(
       normalizedFile,
       MAX_DIMENSION
     );
+    const previewUrl = URL.createObjectURL(blob);
+
     return {
       kind: 'image',
       fileName: normalizedFile.name.replace(/\.(heic|heif)$/i, '.jpg'),
       imageDataUrl: dataUrl,
+      previewUrl,
       sizeKb: Math.max(1, Math.round(approxBytes / 1024)),
     };
   } catch {
@@ -113,11 +127,13 @@ async function processImageFile(file: File): Promise<ProcessedUpload> {
     });
 
     const imageDataUrl = await imageCompression.getDataUrlFromFile(compressedFile);
+    const previewUrl = URL.createObjectURL(compressedFile);
 
     return {
       kind: 'image',
       fileName: compressedFile.name,
       imageDataUrl,
+      previewUrl,
       sizeKb: Math.max(1, Math.round(compressedFile.size / 1024)),
     };
   }
