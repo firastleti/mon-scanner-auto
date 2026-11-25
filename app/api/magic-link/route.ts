@@ -1,5 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { Resend } from 'resend';
 import { createMagicToken, verifyMagicToken } from '@/lib/magicLink';
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -33,15 +43,55 @@ export async function POST(req: NextRequest) {
     const origin = req.nextUrl.origin;
     const magicUrl = `${origin}/?ml=${encodeURIComponent(token)}`;
 
-    // En local / sans fournisseur email configuré : on retourne directement le lien de test
-    // En production, tu pourras brancher ici Resend / Postmark avec `email` et `magicUrl`.
+    const subject = `Ton dossier Scanner Auto : ${vehicleHint}`;
+    const textBody = `Dès que le vendeur t’envoie le rapport Histovec ou le Contrôle Technique, ouvre ton dossier ici : ${magicUrl}`;
+    const htmlBody = `
+      <div style="font-family: Arial, sans-serif; line-height: 1.5; color: #0f172a;">
+        <h2 style="margin-bottom: 8px;">Scanner Auto — Lien de reprise de dossier</h2>
+        <p>Véhicule visé : <strong>${escapeHtml(vehicleHint)}</strong></p>
+        <p>Dès que le vendeur t’envoie le rapport Histovec ou le Contrôle Technique, clique sur le bouton ci-dessous pour rouvrir ton dossier pré-rempli :</p>
+        <p style="margin: 20px 0;">
+          <a href="${escapeHtml(magicUrl)}" style="background: #10b981; color: #020617; padding: 10px 16px; border-radius: 8px; text-decoration: none; font-weight: bold;">
+            Ouvrir mon dossier Scanner Auto
+          </a>
+        </p>
+        <p style="font-size: 12px; color: #475569;">Si le bouton ne s’affiche pas, copie ce lien : ${escapeHtml(magicUrl)}</p>
+      </div>
+    `;
+
+    const resendApiKey = process.env.RESEND_API_KEY?.trim();
+    const fromAddress =
+      process.env.MAGIC_LINK_FROM?.trim() || 'Scanner Auto <onboarding@resend.dev>';
+
+    let emailSent = false;
+    let emailError: string | null = null;
+
+    if (resendApiKey) {
+      const resend = new Resend(resendApiKey);
+      const { error } = await resend.emails.send({
+        from: fromAddress,
+        to: [email],
+        subject,
+        html: htmlBody,
+        text: textBody,
+      });
+
+      if (error) {
+        emailError = error.message;
+      } else {
+        emailSent = true;
+      }
+    }
+
     return NextResponse.json({
       ok: true,
       email,
       magicUrl,
+      emailSent,
+      emailError,
       emailPreview: {
-        subject: `Ton dossier Scanner Auto : ${vehicleHint}`,
-        body: `Dès que le vendeur t’envoie le rapport Histovec ou le Contrôle Technique, ouvre ton dossier ici : ${magicUrl}`,
+        subject,
+        body: textBody,
       },
     });
   } catch (error) {

@@ -76,7 +76,6 @@ export default function HomePage() {
   const [extraction, setExtraction] = useState<VehicleExtraction | null>(null);
   const [evaluation, setEvaluation] = useState<EngineEvaluationResult | null>(null);
 
-  // États de correction manuelle (Garde-fou Post-OCR)
   const [manualMotor, setManualMotor] = useState('');
   const [manualYear, setManualYear] = useState('');
   const [manualMonth, setManualMonth] = useState('');
@@ -87,11 +86,12 @@ export default function HomePage() {
   const [isUnlocked, setIsUnlocked] = useState(false);
   const [copiedKey, setCopiedKey] = useState<'seller' | 'rar' | 'magic' | null>(null);
 
-  // États Chasseur de CT / Magic Link
   const [hunterEmail, setHunterEmail] = useState('');
   const [hunterVehicle, setHunterVehicle] = useState('');
   const [loadingMagic, setLoadingMagic] = useState(false);
   const [magicUrl, setMagicUrl] = useState<string | null>(null);
+  const [magicEmailSent, setMagicEmailSent] = useState(false);
+  const [magicEmailError, setMagicEmailError] = useState<string | null>(null);
   const [restoredBanner, setRestoredBanner] = useState<string | null>(null);
 
   useEffect(() => {
@@ -115,9 +115,7 @@ export default function HomePage() {
             );
           }
         })
-        .catch(() => {
-          // Ignore si token invalide
-        });
+        .catch(() => {});
     }
   }, []);
 
@@ -275,6 +273,8 @@ export default function HomePage() {
     e.preventDefault();
     setError(null);
     setMagicUrl(null);
+    setMagicEmailSent(false);
+    setMagicEmailError(null);
     setLoadingMagic(true);
 
     try {
@@ -295,6 +295,8 @@ export default function HomePage() {
       }
 
       setMagicUrl(data.magicUrl);
+      setMagicEmailSent(Boolean(data.emailSent));
+      setMagicEmailError(typeof data.emailError === 'string' ? data.emailError : null);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Erreur réseau.';
       setError(message);
@@ -704,7 +706,6 @@ export default function HomePage() {
           </div>
         )}
 
-        {/* Chasseur de CT & Magic Link */}
         <form
           onSubmit={handleGenerateMagicLink}
           className="rounded-xl bg-slate-950 border border-slate-800 p-4 space-y-3"
@@ -745,7 +746,18 @@ export default function HomePage() {
 
           {magicUrl && (
             <div className="rounded-lg bg-slate-900 border border-emerald-700/50 p-3 space-y-2 text-xs">
-              <p className="text-emerald-300 font-semibold">Magic Link prêt :</p>
+              {magicEmailSent ? (
+                <p className="text-emerald-300 font-semibold">
+                  Email envoyé à {hunterEmail} avec ton Magic Link.
+                </p>
+              ) : (
+                <p className="text-emerald-300 font-semibold">Magic Link prêt :</p>
+              )}
+              {magicEmailError && (
+                <p className="text-amber-300">
+                  Envoi email non effectué ({magicEmailError}). Tu peux utiliser le lien direct ci-dessous :
+                </p>
+              )}
               <p className="font-mono break-all text-slate-200">{magicUrl}</p>
               <div className="flex flex-wrap gap-2">
                 <button
