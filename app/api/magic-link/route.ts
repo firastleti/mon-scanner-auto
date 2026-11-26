@@ -18,6 +18,8 @@ export async function POST(req: NextRequest) {
     const vehicleHint =
       typeof body?.vehicleHint === 'string' ? body.vehicleHint.trim() : '';
     const notes = typeof body?.notes === 'string' ? body.notes.trim() : undefined;
+    const passUnlocked = Boolean(body?.passUnlocked);
+    const includeCerfa = Boolean(body?.includeCerfa);
 
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return NextResponse.json(
@@ -37,6 +39,8 @@ export async function POST(req: NextRequest) {
       email,
       vehicleHint,
       notes,
+      passUnlocked,
+      includeCerfa,
       createdAt: new Date().toISOString(),
     });
 

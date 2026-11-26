@@ -4,6 +4,8 @@ export interface MagicLeadPayload {
   email: string;
   vehicleHint: string;
   notes?: string;
+  passUnlocked?: boolean;
+  includeCerfa?: boolean;
   createdAt: string;
 }
 

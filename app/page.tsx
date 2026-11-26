@@ -84,6 +84,7 @@ export default function HomePage() {
   const [includeCerfaBump, setIncludeCerfaBump] = useState(false);
   const [waiverAccepted, setWaiverAccepted] = useState(false);
   const [isUnlocked, setIsUnlocked] = useState(false);
+  const [restoredAccess, setRestoredAccess] = useState(false);
   const [copiedKey, setCopiedKey] = useState<'seller' | 'rar' | 'magic' | null>(null);
 
   const [hunterEmail, setHunterEmail] = useState('');
@@ -110,8 +111,21 @@ export default function HomePage() {
             setExtraNotes(restoredText);
             setHunterEmail(data.payload.email || '');
             setHunterVehicle(data.payload.vehicleHint || '');
+
+            const hasPass = Boolean(data.payload.passUnlocked);
+            if (hasPass) {
+              setRestoredAccess(true);
+              setIsUnlocked(true);
+              setWaiverAccepted(true);
+              if (typeof data.payload.includeCerfa === 'boolean') {
+                setIncludeCerfaBump(data.payload.includeCerfa);
+              }
+            }
+
             setRestoredBanner(
-              `Dossier repris via Magic Link pour ${data.payload.email} (${data.payload.vehicleHint}). Ajoute maintenant le PDF/photo du CT ou de l’Histovec.`
+              hasPass
+                ? `Dossier et accès rapport débloqué repris via Magic Link pour ${data.payload.email} (${data.payload.vehicleHint}). Ajoute maintenant le PDF/photo du CT ou de l’Histovec.`
+                : `Dossier repris via Magic Link pour ${data.payload.email} (${data.payload.vehicleHint}). Ajoute maintenant le PDF/photo du CT ou de l’Histovec.`
             );
           }
         })
@@ -141,7 +155,9 @@ export default function HomePage() {
     setError(null);
     setExtraction(null);
     setEvaluation(null);
-    setIsUnlocked(false);
+    if (!restoredAccess) {
+      setIsUnlocked(false);
+    }
     setCopiedKey(null);
   }
 
@@ -286,6 +302,8 @@ export default function HomePage() {
           email: hunterEmail.trim(),
           vehicleHint: hint,
           notes: extraNotes.trim() || undefined,
+          passUnlocked: isUnlocked || restoredAccess,
+          includeCerfa: includeCerfaBump,
         }),
       });
 
