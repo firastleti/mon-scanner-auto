@@ -11,6 +11,9 @@ import {
   SellerMessageTone,
 } from '@/lib/reportGenerator';
 
+type ReportTab = 'diagnostic' | 'budget' | 'inspection' | 'achat';
+type CheckStatus = 'pending' | 'ok' | 'defect' | 'verify';
+
 const DEMO_SCENARIO: {
   label: string;
   notes: string;
@@ -129,9 +132,11 @@ export default function HomePage() {
   const [waiverAccepted, setWaiverAccepted] = useState(false);
   const [isUnlocked, setIsUnlocked] = useState(false);
   const [restoredAccess, setRestoredAccess] = useState(false);
+  const [activeTab, setActiveTab] = useState<ReportTab>('diagnostic');
   const [expandLetter, setExpandLetter] = useState(false);
   const [messageTone, setMessageTone] = useState<SellerMessageTone>('courtois');
-  const [checkedItems, setCheckedItems] = useState<Record<number, boolean>>({});
+  const [checklistStates, setChecklistStates] = useState<Record<number, CheckStatus>>({});
+  const [fieldNote, setFieldNote] = useState('');
   const [copiedKey, setCopiedKey] = useState<'seller' | 'rar' | 'magic' | null>(null);
   const [shareFeedback, setShareFeedback] = useState<string | null>(null);
 
@@ -197,39 +202,111 @@ export default function HomePage() {
     return buildFullReport(extraction, evaluation, extraNotes);
   }, [extraction, evaluation, extraNotes]);
 
-  const checklistStorageKey = useMemo(() => {
+  const visitStorageKey = useMemo(() => {
     if (!fullReport) return null;
-    return `scanner_auto_checklist_${fullReport.vehicleTitle}`;
+    return `scanner_auto_visit_${fullReport.vehicleTitle}`;
   }, [fullReport]);
 
   useEffect(() => {
-    if (!checklistStorageKey || typeof window === 'undefined') return;
+    if (!visitStorageKey || typeof window === 'undefined') return;
     try {
-      const raw = window.localStorage.getItem(checklistStorageKey);
+      const raw = window.localStorage.getItem(visitStorageKey);
       if (raw) {
-        const parsed = JSON.parse(raw) as Record<number, boolean>;
-        setCheckedItems(parsed);
+        const parsed = JSON.parse(raw) as {
+          states?: Record<number, CheckStatus>;
+          note?: string;
+        };
+        setChecklistStates(parsed.states ?? {});
+        setFieldNote(parsed.note ?? '');
       } else {
-        setCheckedItems({});
+        setChecklistStates({});
+        setFieldNote('');
       }
     } catch {
-      setCheckedItems({});
+      setChecklistStates({});
+      setFieldNote('');
     }
-  }, [checklistStorageKey]);
+  }, [visitStorageKey]);
 
-  function toggleChecklistItem(idx: number) {
-    setCheckedItems((prev) => {
-      const next = { ...prev, [idx]: !prev[idx] };
-      if (checklistStorageKey && typeof window !== 'undefined') {
-        try {
-          window.localStorage.setItem(checklistStorageKey, JSON.stringify(next));
-        } catch {
-          // Ignore storage quota errors
-        }
-      }
+  function saveVisitState(nextStates: Record<number, CheckStatus>, nextNote: string) {
+    if (!visitStorageKey || typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(
+        visitStorageKey,
+        JSON.stringify({ states: nextStates, note: nextNote })
+      );
+    } catch {
+      // Ignore storage quota errors
+    }
+  }
+
+  function updateCheckStatus(idx: number, status: CheckStatus) {
+    setChecklistStates((prev) => {
+      const nextStatus: CheckStatus = prev[idx] === status ? 'pending' : status;
+      const next = { ...prev, [idx]: nextStatus };
+      saveVisitState(next, fieldNote);
       return next;
     });
   }
+
+  function handleFieldNoteChange(value: string) {
+    setFieldNote(value);
+    saveVisitState(checklistStates, value);
+  }
+
+  const checklistProgress = useMemo(() => {
+    const total = fullReport?.inspectionChecklist.length ?? 0;
+    if (total === 0) return { completed: 0, total: 0, percent: 0 };
+    const completed = Object.values(checklistStates).filter((s) => s && s !== 'pending').length;
+    return {
+      completed,
+      total,
+      percent: Math.round((completed / total) * 100),
+    };
+  }, [fullReport, checklistStates]);
+
+  const confidenceMeter = useMemo(() => {
+    if (!evaluation) return null;
+    if (evaluation.incompleteData) {
+      return {
+        percent: 15,
+        label: 'Confiance : 15 % — Données incomplètes (ajoutez motorisation, année et km)',
+        barClass: 'bg-slate-500',
+      };
+    }
+    if (isDemoMode) {
+      return {
+        percent: 65,
+        label: 'Confiance : 65 % — Simulation d’exemple (Peugeot 208)',
+        barClass: 'bg-indigo-400',
+      };
+    }
+    if (!result) {
+      return {
+        percent: 35,
+        label: 'Confiance : 35 % — Texte seul (ajoutez CT + Histovec pour atteindre 90 %+)',
+        barClass: 'bg-amber-400',
+      };
+    }
+    return {
+      percent: 85,
+      label: 'Confiance : 85 % — Document analysé (croisez avec Histovec & factures)',
+      barClass: 'bg-emerald-400',
+    };
+  }, [evaluation, isDemoMode, result]);
+
+  const targetPriceRange = useMemo(() => {
+    if (!fullReport || fullReport.listedPriceEur === null) return null;
+    const low = Math.max(
+      500,
+      fullReport.listedPriceEur - fullReport.negotiationAdvice.suggestedDiscountDealer
+    );
+    const high = Math.max(
+      500,
+      fullReport.listedPriceEur - fullReport.negotiationAdvice.suggestedDiscountIndep
+    );
+    return { low, high };
+  }, [fullReport]);
 
   const documentCrossChecks = useMemo(() => {
     if (!extraction || !result) return [];
@@ -268,20 +345,6 @@ export default function HomePage() {
     return items;
   }, [extraction, result]);
 
-  const evidenceReliabilityNotice = useMemo(() => {
-    if (!evaluation) return null;
-    if (isDemoMode) {
-      return 'Simulation d’exemple : basée sur un scénario de démonstration. Importez un document ou des notes réelles pour un cas concret.';
-    }
-    if (evaluation.incompleteData) {
-      return 'Données trop partielles pour conclure — renseignez la motorisation, la date de mise en circulation et le kilométrage ou importez un document.';
-    }
-    if (!result) {
-      return 'Fiabilité limitée — basée sur le texte/notes seuls : ajoutez le rapport Histovec, le contrôle technique ou la carte grise pour affiner l’analyse.';
-    }
-    return 'Fiabilité renforcée — document analysé. Croisez avec l’Histovec, les factures et l’inspection physique avant achat.';
-  }, [evaluation, isDemoMode, result]);
-
   function syncManualInputs(ext: VehicleExtraction) {
     setManualMotor(ext.motorisation_texte ?? '');
     setManualYear(ext.annee_mec ? String(ext.annee_mec) : '');
@@ -295,6 +358,7 @@ export default function HomePage() {
     setEvaluation(null);
     setIsDemoMode(false);
     setExpandLetter(false);
+    setActiveTab('diagnostic');
     setShareFeedback(null);
     if (!restoredAccess) {
       setIsUnlocked(false);
@@ -477,6 +541,7 @@ export default function HomePage() {
 
     setError(null);
     setIsUnlocked(true);
+    setActiveTab('diagnostic');
   }
 
   async function handleCopyText(text: string, key: 'seller' | 'rar' | 'magic') {
@@ -557,7 +622,6 @@ export default function HomePage() {
       y += 2.5;
     };
 
-    // En-tête blanc sobre
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(15);
     doc.setTextColor(6, 95, 70);
@@ -586,16 +650,17 @@ export default function HomePage() {
     if (
       fullReport.listedPriceEur !== null &&
       fullReport.truePurchaseCostIndep !== null &&
-      fullReport.truePurchaseCostDealer !== null
+      fullReport.truePurchaseCostDealer !== null &&
+      targetPriceRange
     ) {
       addParagraph(
-        `Coût réel estimé : Prix affiché (${fullReport.listedPriceEur.toLocaleString(
+        `Coût réel estimé : ${fullReport.truePurchaseCostIndep.toLocaleString(
           'fr-FR'
-        )} €) + Travaux préventifs (${fullReport.negotiationAdvice.suggestedDiscountIndep.toLocaleString(
+        )} € à ${fullReport.truePurchaseCostDealer.toLocaleString(
           'fr-FR'
-        )} €) = ${fullReport.truePurchaseCostIndep.toLocaleString(
+        )} € | Prix cible recommandé : ${targetPriceRange.low.toLocaleString(
           'fr-FR'
-        )} € (jusqu’à ${fullReport.truePurchaseCostDealer.toLocaleString('fr-FR')} € en concession).`,
+        )} € – ${targetPriceRange.high.toLocaleString('fr-FR')} €.`,
         9.5,
         true
       );
@@ -612,8 +677,15 @@ export default function HomePage() {
     }
 
     addSectionTitle('4. Check-list terrain (à cocher devant le véhicule)');
-    for (const item of fullReport.inspectionChecklist) {
-      addParagraph(`[  ] ${item}`);
+    fullReport.inspectionChecklist.forEach((item, idx) => {
+      const st = checklistStates[idx];
+      const prefix =
+        st === 'ok' ? '[OK] ' : st === 'defect' ? '[DÉFAUT] ' : st === 'verify' ? '[À VÉRIFIER] ' : '[  ] ';
+      addParagraph(`${prefix}${item}`);
+    });
+
+    if (fieldNote.trim()) {
+      addParagraph(`Notes de visite : ${fieldNote.trim()}`, 9, true);
     }
 
     addSectionTitle('5. Message vendeur sélectionné');
@@ -682,7 +754,7 @@ export default function HomePage() {
   const isPassActive = isUnlocked || restoredAccess;
 
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-100 p-4 sm:p-6 pb-24 sm:pb-6 flex flex-col items-center justify-center print:bg-white print:text-black print:p-0">
+    <main className="min-h-screen bg-slate-950 text-slate-100 p-4 sm:p-6 pb-28 flex flex-col items-center justify-center print:bg-white print:text-black print:p-0">
       <div className="w-full max-w-2xl rounded-2xl border border-slate-800 bg-slate-900 p-5 sm:p-6 space-y-5 print:border-none print:bg-white print:max-w-none print:p-4">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 print:hidden">
           <div>
@@ -809,6 +881,7 @@ export default function HomePage() {
               </div>
             )}
 
+            {/* SCORE + JAUGE DE RISQUE */}
             <div className="space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span
@@ -839,22 +912,21 @@ export default function HomePage() {
               )}
             </div>
 
-            {evidenceReliabilityNotice && (
-              <p className="rounded-lg bg-slate-900 border border-slate-800 px-3 py-2 text-xs text-slate-300 print:bg-slate-100 print:text-black print:border-slate-300">
-                {evidenceReliabilityNotice}
-              </p>
-            )}
-
-            {documentCrossChecks.length > 0 && (
-              <div className="rounded-lg bg-slate-900 p-3 border border-slate-800 text-xs space-y-1.5 print:bg-slate-100 print:text-black print:border-slate-300">
-                <p className="font-semibold text-emerald-300 print:text-black">
-                  Contrôles & recoupements sur le document analysé
-                </p>
-                <ul className="list-disc list-inside text-slate-200 space-y-1 print:text-black">
-                  {documentCrossChecks.map((item, idx) => (
-                    <li key={idx}>{item}</li>
-                  ))}
-                </ul>
+            {/* JAUGE VISUELLE DE CONFIANCE DE L'ANALYSE */}
+            {confidenceMeter && (
+              <div className="rounded-lg bg-slate-900 border border-slate-800 p-3 space-y-1.5 print:bg-slate-100 print:border-slate-300">
+                <div className="flex items-center justify-between gap-2 text-xs">
+                  <span className="text-slate-300 print:text-black">{confidenceMeter.label}</span>
+                  <span className="font-mono font-semibold text-slate-200 shrink-0 print:text-black">
+                    {confidenceMeter.percent}%
+                  </span>
+                </div>
+                <div className="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden print:bg-slate-200">
+                  <div
+                    className={`h-full transition-all duration-300 ${confidenceMeter.barClass}`}
+                    style={{ width: `${confidenceMeter.percent}%` }}
+                  />
+                </div>
               </div>
             )}
 
@@ -930,191 +1002,162 @@ export default function HomePage() {
               </form>
             )}
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-              <div className="rounded-lg bg-slate-900 p-3 border border-slate-800 print:bg-slate-100 print:border-slate-300">
-                <p className="text-xs text-slate-400 print:text-slate-700">
-                  Niveau de coût potentiel
-                </p>
-                {!isUnlocked ? (
-                  <>
+            {/* VUE GRATUITE + PAYWALL (SI NON DÉBLOQUÉ) */}
+            {!isUnlocked && fullReport && (
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                  <div className="rounded-lg bg-slate-900 p-3 border border-slate-800">
+                    <p className="text-xs text-slate-400">Niveau de coût potentiel</p>
                     <p className="mt-1 font-semibold">{evaluation.costTierLabel}</p>
-                    <p className="text-[11px] text-slate-400 mt-1 print:text-slate-700">
+                    <p className="text-[11px] text-slate-400 mt-1">
                       Montant détaillé (indépendant vs concession) inclus dans le rapport complet.
                     </p>
-                  </>
-                ) : (
-                  <>
-                    <p className="mt-1 font-semibold">
-                      Indépendant : {evaluation.estimatedRepairCost.independant.toLocaleString('fr-FR')} €
-                    </p>
-                    <p className="text-xs text-slate-300 print:text-black">
-                      Concession : {evaluation.estimatedRepairCost.concession.toLocaleString('fr-FR')} €
-                    </p>
-                    <p className="text-[11px] text-slate-500 mt-1 print:text-slate-700">
-                      Travaux préventifs indicatifs (hors casse moteur ou turbo).
-                    </p>
-                  </>
-                )}
-              </div>
-
-              <div className="rounded-lg bg-slate-900 p-3 border border-slate-800 print:bg-slate-100 print:border-slate-300">
-                <p className="text-xs text-slate-400 print:text-slate-700">Vignette Crit’Air</p>
-                <p className="mt-1 font-semibold">{evaluation.critAir.vignette}</p>
-                <p className="text-xs text-slate-400 mt-0.5 print:text-slate-700">
-                  {formatCritAirSource(evaluation.critAir.source)}
-                </p>
-              </div>
-            </div>
-
-            {evaluation.matchedEngine && (
-              <div className="rounded-lg bg-slate-900 p-3 border border-slate-800 text-xs space-y-2 print:bg-slate-100 print:border-slate-300">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <p className="text-slate-400 print:text-slate-700">Motorisation identifiée :</p>
-                    <p className="font-semibold text-slate-100 print:text-black">
-                      {evaluation.matchedEngine.label}
-                    </p>
                   </div>
-                  {hingeBadge && (
-                    <span
-                      className={`px-2.5 py-1 rounded-full border text-[11px] font-semibold ${hingeBadge.className}`}
-                    >
-                      {hingeBadge.label}
-                    </span>
-                  )}
-                </div>
-                {evaluation.matchedEngine.hingeNote && (
-                  <p className="text-amber-300 print:text-amber-900">
-                    {evaluation.matchedEngine.hingeNote}
-                  </p>
-                )}
-              </div>
-            )}
 
-            {evaluation.mileageCheck.note && (
-              <div className="rounded-lg bg-slate-900 p-3 border border-slate-800 text-xs print:bg-slate-100 print:border-slate-300">
-                <p className="text-slate-400 print:text-slate-700">Cohérence kilométrique :</p>
-                <p className="text-slate-200 mt-0.5 print:text-black">
-                  {evaluation.mileageCheck.note}
-                </p>
-              </div>
-            )}
-
-            {evaluation.alerts.length > 0 && (
-              <div className="space-y-1">
-                <p className="text-xs font-semibold text-amber-300 print:text-amber-900">
-                  Points d’attention :
-                </p>
-                <ul className="list-disc list-inside text-xs text-slate-200 space-y-1 print:text-black">
-                  {evaluation.alerts.map((alert, idx) => (
-                    <li key={idx}>{alert}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {!isUnlocked && fullReport && (
-              <div
-                id="paywall-card"
-                className="rounded-xl bg-slate-900 border border-emerald-700/50 p-4 space-y-4 print:hidden"
-              >
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <p className="text-sm font-bold text-emerald-300">
-                      Pass 30 jours — Rapport complet & Négociation
-                    </p>
+                  <div className="rounded-lg bg-slate-900 p-3 border border-slate-800">
+                    <p className="text-xs text-slate-400">Vignette Crit’Air</p>
+                    <p className="mt-1 font-semibold">{evaluation.critAir.vignette}</p>
                     <p className="text-xs text-slate-400 mt-0.5">
-                      Valable 30 jours (analyses multiples incluses). Montants détaillés, stratégie de négociation, check-list terrain et messages vendeur.
+                      {formatCritAirSource(evaluation.critAir.source)}
                     </p>
                   </div>
-                  <div className="text-right shrink-0">
-                    <span className="text-lg font-bold text-white whitespace-nowrap block">
-                      {totalPrice} €
-                    </span>
-                    {includeCerfaBump && (
-                      <span className="text-[11px] text-emerald-300 block">
-                        19,90 € + 9,90 € = 29,80 €
-                      </span>
-                    )}
-                  </div>
                 </div>
 
-                <p className="text-xs font-medium text-emerald-200 bg-emerald-950/30 border border-emerald-800/40 rounded-lg px-3 py-2">
-                  {roiAnchorText}
-                </p>
-
-                <div className="rounded-lg bg-slate-950/80 border border-slate-800 p-3 space-y-2 relative overflow-hidden">
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-                    Aperçu du rapport complet :
-                  </p>
-                  <ul className="list-disc list-inside text-xs text-slate-200 space-y-1">
-                    {fullReport.inspectionChecklist.slice(0, 2).map((item, idx) => (
-                      <li key={idx}>{item}</li>
-                    ))}
-                  </ul>
-                  <div className="text-xs text-slate-400 blur-[5px] select-none pt-1">
-                    • Estimation détaillée indépendant / concession et calcul du coût réel estimé incluant les travaux préventifs...
-                    <br />• 3 modèles de messages vendeur (courtois, technique, négociation) et check-list interactive sur place.
-                  </div>
-                </div>
-
-                <label className="flex items-start gap-2.5 text-xs text-slate-200 bg-slate-950 p-3 rounded-lg border border-slate-800 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={includeCerfaBump}
-                    onChange={(e) => setIncludeCerfaBump(e.target.checked)}
-                    className="mt-0.5 accent-emerald-500 shrink-0"
-                  />
-                  <div className="space-y-1 flex-1">
+                {evaluation.matchedEngine && (
+                  <div className="rounded-lg bg-slate-900 p-3 border border-slate-800 text-xs space-y-2">
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p className="font-semibold text-amber-300">
-                        Pack Achat Serein (+9,90 €) : Sécurité le jour J + Protection litige
-                      </p>
-                      {includeCerfaBump && (
-                        <span className="text-[11px] font-semibold text-emerald-300">
-                          Total : 29,80 €
+                      <div>
+                        <p className="text-slate-400">Motorisation identifiée :</p>
+                        <p className="font-semibold text-slate-100">
+                          {evaluation.matchedEngine.label}
+                        </p>
+                      </div>
+                      {hingeBadge && (
+                        <span
+                          className={`px-2.5 py-1 rounded-full border text-[11px] font-semibold ${hingeBadge.className}`}
+                        >
+                          {hingeBadge.label}
                         </span>
                       )}
                     </div>
-                    <ul className="list-disc list-inside text-[11px] text-slate-300 space-y-0.5">
-                      <li><strong>Avant & jour de l’achat :</strong> Vérification des papiers, cession (Cerfa 15776*02) & ANTS.</li>
-                      <li><strong>En cas de litige :</strong> Modèle de Lettre Recommandée (LRAR) pour vice caché.</li>
+                  </div>
+                )}
+
+                {evaluation.alerts.length > 0 && (
+                  <div className="space-y-1">
+                    <p className="text-xs font-semibold text-amber-300">Points d’attention :</p>
+                    <ul className="list-disc list-inside text-xs text-slate-200 space-y-1">
+                      {evaluation.alerts.map((alert, idx) => (
+                        <li key={idx}>{alert}</li>
+                      ))}
                     </ul>
                   </div>
-                </label>
+                )}
 
-                <label className="flex items-start gap-2.5 text-xs text-slate-300 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={waiverAccepted}
-                    onChange={(e) => setWaiverAccepted(e.target.checked)}
-                    className="mt-0.5 accent-emerald-500 shrink-0"
-                  />
-                  <span>{fullReport.legalDisclaimers.withdrawalWaiverText}</span>
-                </label>
+                <div
+                  id="paywall-card"
+                  className="rounded-xl bg-slate-900 border border-emerald-700/50 p-4 space-y-4 print:hidden"
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-sm font-bold text-emerald-300">
+                        Pass 30 jours — Rapport complet & Négociation
+                      </p>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        Valable 30 jours (analyses multiples incluses). Montants détaillés, prix cible, check-list terrain et messages vendeur.
+                      </p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <span className="text-lg font-bold text-white whitespace-nowrap block">
+                        {totalPrice} €
+                      </span>
+                      {includeCerfaBump && (
+                        <span className="text-[11px] text-emerald-300 block">
+                          19,90 € + 9,90 € = 29,80 €
+                        </span>
+                      )}
+                    </div>
+                  </div>
 
-                <div className="space-y-2">
-                  <button
-                    type="button"
-                    onClick={handleLocalTestUnlock}
-                    className="w-full rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold py-2.5 text-sm transition cursor-pointer"
-                  >
-                    {unlockButtonLabel}
-                  </button>
-                  <p className="text-[11px] text-center text-slate-400">
-                    Paiement sécurisé Stripe / Apple Pay • Accès instantané • Sans abonnement (aucun renouvellement automatique)
+                  <p className="text-xs font-medium text-emerald-200 bg-emerald-950/30 border border-emerald-800/40 rounded-lg px-3 py-2">
+                    {roiAnchorText}
                   </p>
+
+                  <div className="rounded-lg bg-slate-950/80 border border-slate-800 p-3 space-y-2 relative overflow-hidden">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                      Aperçu du rapport complet :
+                    </p>
+                    <ul className="list-disc list-inside text-xs text-slate-200 space-y-1">
+                      {fullReport.inspectionChecklist.slice(0, 2).map((item, idx) => (
+                        <li key={idx}>{item}</li>
+                      ))}
+                    </ul>
+                    <div className="text-xs text-slate-400 blur-[5px] select-none pt-1">
+                      • Estimation détaillée indépendant / concession et calcul du prix cible recommandé...
+                      <br />• 3 modèles de messages vendeur (courtois, technique, négociation) et check-list interactive sur place.
+                    </div>
+                  </div>
+
+                  <label className="flex items-start gap-2.5 text-xs text-slate-200 bg-slate-950 p-3 rounded-lg border border-slate-800 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={includeCerfaBump}
+                      onChange={(e) => setIncludeCerfaBump(e.target.checked)}
+                      className="mt-0.5 accent-emerald-500 shrink-0"
+                    />
+                    <div className="space-y-1 flex-1">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="font-semibold text-amber-300">
+                          Pack Achat Serein (+9,90 €) : Sécurité le jour J + Protection litige
+                        </p>
+                        {includeCerfaBump && (
+                          <span className="text-[11px] font-semibold text-emerald-300">
+                            Total : 29,80 €
+                          </span>
+                        )}
+                      </div>
+                      <ul className="list-disc list-inside text-[11px] text-slate-300 space-y-0.5">
+                        <li><strong>Avant & jour de l’achat :</strong> Vérification des papiers, cession (Cerfa 15776*02) & ANTS.</li>
+                        <li><strong>En cas de litige :</strong> Modèle de Lettre Recommandée (LRAR) pour vice caché.</li>
+                      </ul>
+                    </div>
+                  </label>
+
+                  <label className="flex items-start gap-2.5 text-xs text-slate-300 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={waiverAccepted}
+                      onChange={(e) => setWaiverAccepted(e.target.checked)}
+                      className="mt-0.5 accent-emerald-500 shrink-0"
+                    />
+                    <span>{fullReport.legalDisclaimers.withdrawalWaiverText}</span>
+                  </label>
+
+                  <div className="space-y-2">
+                    <button
+                      type="button"
+                      onClick={handleLocalTestUnlock}
+                      className="w-full rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold py-2.5 text-sm transition cursor-pointer"
+                    >
+                      {unlockButtonLabel}
+                    </button>
+                    <p className="text-[11px] text-center text-slate-400">
+                      Paiement sécurisé Stripe / Apple Pay • Accès instantané • Sans abonnement (aucun renouvellement automatique)
+                    </p>
+                  </div>
                 </div>
-              </div>
+              </>
             )}
 
+            {/* RAPPORT DÉBLOQUÉ EN 4 ONGLETS CHRONOLOGIQUES */}
             {isUnlocked && fullReport && (
               <div className="rounded-xl bg-slate-900 border border-emerald-600/60 p-4 space-y-4 text-sm print:bg-white print:border-slate-300 print:text-black">
                 {/* EN-TÊTE EMPILÉ EN PLEINE LARGEUR */}
-                <div className="flex flex-col gap-4 border-b border-slate-800 pb-4 print:border-slate-300">
+                <div className="flex flex-col gap-3 border-b border-slate-800 pb-4 print:border-slate-300">
                   <div className="w-full">
                     <p className="text-[11px] uppercase tracking-wider text-emerald-400 font-semibold print:text-black">
-                      Pass 30 jours actif — Rapport & Pack LRAR
+                      Pass 30 jours actif — Rapport complet
+                      {includeCerfaBump ? ' & Pack Achat Serein' : ''}
                     </p>
                     <p className="text-[11px] text-slate-400 mt-0.5 print:text-slate-700">
                       Valable 30 jours • analyses multiples incluses • Expire dans 30 jours
@@ -1160,180 +1203,425 @@ export default function HomePage() {
                   </div>
                 </div>
 
-                <p className="text-xs text-slate-300 print:text-black">{fullReport.executiveSummary}</p>
+                {/* BARRE DES 4 ONGLETS */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 print:hidden">
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('diagnostic')}
+                    className={`rounded-lg px-2.5 py-2 text-xs font-semibold border transition cursor-pointer ${
+                      activeTab === 'diagnostic'
+                        ? 'bg-emerald-500 text-slate-950 border-emerald-400'
+                        : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
+                    }`}
+                  >
+                    1. Diagnostic
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('budget')}
+                    className={`rounded-lg px-2.5 py-2 text-xs font-semibold border transition cursor-pointer ${
+                      activeTab === 'budget'
+                        ? 'bg-emerald-500 text-slate-950 border-emerald-400'
+                        : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
+                    }`}
+                  >
+                    2. Budget & Négo
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('inspection')}
+                    className={`rounded-lg px-2.5 py-2 text-xs font-semibold border transition cursor-pointer ${
+                      activeTab === 'inspection'
+                        ? 'bg-emerald-500 text-slate-950 border-emerald-400'
+                        : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
+                    }`}
+                  >
+                    3. Terrain ({checklistProgress.completed}/{checklistProgress.total})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('achat')}
+                    className={`rounded-lg px-2.5 py-2 text-xs font-semibold border transition cursor-pointer ${
+                      activeTab === 'achat'
+                        ? 'bg-emerald-500 text-slate-950 border-emerald-400'
+                        : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
+                    }`}
+                  >
+                    4. Achat & LRAR
+                  </button>
+                </div>
 
-                {fullReport.listedPriceEur !== null &&
-                  fullReport.truePurchaseCostIndep !== null &&
-                  fullReport.truePurchaseCostDealer !== null && (
-                    <div className="rounded-lg bg-slate-950 p-3 border border-amber-700/40 space-y-1 print:bg-slate-100 print:border-slate-300">
-                      <p className="text-xs font-semibold text-amber-300 print:text-black">
-                        Coût réel estimé
+                {/* ONGLET 1 : DIAGNOSTIC & RISQUES */}
+                {activeTab === 'diagnostic' && (
+                  <div className="space-y-4">
+                    <p className="text-xs text-slate-300 print:text-black">
+                      {fullReport.executiveSummary}
+                    </p>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                      <div className="rounded-lg bg-slate-950 p-3 border border-slate-800 print:bg-slate-100 print:border-slate-300">
+                        <p className="text-xs text-slate-400 print:text-slate-700">
+                          Travaux préventifs estimés
+                        </p>
+                        <p className="mt-1 font-semibold">
+                          Indépendant : {evaluation.estimatedRepairCost.independant.toLocaleString('fr-FR')} €
+                        </p>
+                        <p className="text-xs text-slate-300 print:text-black">
+                          Concession : {evaluation.estimatedRepairCost.concession.toLocaleString('fr-FR')} €
+                        </p>
+                      </div>
+
+                      <div className="rounded-lg bg-slate-950 p-3 border border-slate-800 print:bg-slate-100 print:border-slate-300">
+                        <p className="text-xs text-slate-400 print:text-slate-700">Vignette Crit’Air</p>
+                        <p className="mt-1 font-semibold">{evaluation.critAir.vignette}</p>
+                        <p className="text-xs text-slate-400 mt-0.5 print:text-slate-700">
+                          {formatCritAirSource(evaluation.critAir.source)}
+                        </p>
+                      </div>
+                    </div>
+
+                    {evaluation.matchedEngine && (
+                      <div className="rounded-lg bg-slate-950 p-3 border border-slate-800 text-xs space-y-2 print:bg-slate-100 print:border-slate-300">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div>
+                            <p className="text-slate-400 print:text-slate-700">Motorisation identifiée :</p>
+                            <p className="font-semibold text-slate-100 print:text-black">
+                              {evaluation.matchedEngine.label}
+                            </p>
+                          </div>
+                          {hingeBadge && (
+                            <span
+                              className={`px-2.5 py-1 rounded-full border text-[11px] font-semibold ${hingeBadge.className}`}
+                            >
+                              {hingeBadge.label}
+                            </span>
+                          )}
+                        </div>
+                        {evaluation.matchedEngine.hingeNote && (
+                          <p className="text-amber-300 print:text-amber-900">
+                            {evaluation.matchedEngine.hingeNote}
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {evaluation.mileageCheck.note && (
+                      <div className="rounded-lg bg-slate-950 p-3 border border-slate-800 text-xs print:bg-slate-100 print:border-slate-300">
+                        <p className="text-slate-400 print:text-slate-700">Cohérence kilométrique :</p>
+                        <p className="text-slate-200 mt-0.5 print:text-black">
+                          {evaluation.mileageCheck.note}
+                        </p>
+                      </div>
+                    )}
+
+                    {documentCrossChecks.length > 0 && (
+                      <div className="rounded-lg bg-slate-950 p-3 border border-slate-800 text-xs space-y-1.5 print:bg-slate-100 print:border-slate-300">
+                        <p className="font-semibold text-emerald-300 print:text-black">
+                          Contrôles & recoupements sur le document analysé
+                        </p>
+                        <ul className="list-disc list-inside text-slate-200 space-y-1 print:text-black">
+                          {documentCrossChecks.map((item, idx) => (
+                            <li key={idx}>{item}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {evaluation.alerts.length > 0 && (
+                      <div className="space-y-1">
+                        <p className="text-xs font-semibold text-amber-300 print:text-amber-900">
+                          Points d’attention :
+                        </p>
+                        <ul className="list-disc list-inside text-xs text-slate-200 space-y-1 print:text-black">
+                          {evaluation.alerts.map((alert, idx) => (
+                            <li key={idx}>{alert}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* ONGLET 2 : BUDGET & NÉGOCIATION */}
+                {activeTab === 'budget' && (
+                  <div className="space-y-4">
+                    {fullReport.listedPriceEur !== null &&
+                      fullReport.truePurchaseCostIndep !== null &&
+                      fullReport.truePurchaseCostDealer !== null &&
+                      targetPriceRange && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div className="rounded-lg bg-slate-950 p-3 border border-amber-700/50 space-y-1 print:bg-slate-100 print:border-slate-300">
+                            <p className="text-xs font-semibold text-amber-300 print:text-black">
+                              Coût réel estimé
+                            </p>
+                            <p className="text-sm font-bold text-white print:text-black">
+                              {fullReport.truePurchaseCostIndep.toLocaleString('fr-FR')} € –{' '}
+                              {fullReport.truePurchaseCostDealer.toLocaleString('fr-FR')} €
+                            </p>
+                            <p className="text-[11px] text-slate-400 print:text-slate-700">
+                              Prix affiché ({fullReport.listedPriceEur.toLocaleString('fr-FR')} €) + travaux préventifs.
+                            </p>
+                          </div>
+
+                          <div className="rounded-lg bg-slate-950 p-3 border border-emerald-700/50 space-y-1 print:bg-slate-100 print:border-slate-300">
+                            <p className="text-xs font-semibold text-emerald-300 print:text-black">
+                              Prix cible recommandé
+                            </p>
+                            <p className="text-sm font-bold text-white print:text-black">
+                              {targetPriceRange.low.toLocaleString('fr-FR')} € –{' '}
+                              {targetPriceRange.high.toLocaleString('fr-FR')} €
+                            </p>
+                            <p className="text-[11px] text-slate-400 print:text-slate-700">
+                              Prix affiché moins le budget travaux à déduire.
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
+                    <div className="rounded-lg bg-slate-950 p-3 border border-slate-800 space-y-1 print:bg-slate-100 print:border-slate-300">
+                      <p className="text-xs font-semibold text-emerald-400 print:text-black">
+                        Stratégie de négociation
                       </p>
                       <p className="text-xs text-slate-200 print:text-black">
-                        Prix affiché ({fullReport.listedPriceEur.toLocaleString('fr-FR')} €) + Travaux préventifs ({fullReport.negotiationAdvice.suggestedDiscountIndep.toLocaleString('fr-FR')} €) ={' '}
-                        <strong>{fullReport.truePurchaseCostIndep.toLocaleString('fr-FR')} €</strong>{' '}
-                        (jusqu’à{' '}
-                        <strong>{fullReport.truePurchaseCostDealer.toLocaleString('fr-FR')} €</strong>{' '}
-                        en concession).
+                        {fullReport.negotiationAdvice.argumentSummary}
+                      </p>
+                      <p className="text-[11px] text-slate-400 print:text-slate-700">
+                        {fullReport.negotiationAdvice.repairScopeDetail}
                       </p>
                     </div>
-                  )}
 
-                <div className="rounded-lg bg-slate-950 p-3 border border-slate-800 space-y-1 print:bg-slate-100 print:border-slate-300">
-                  <p className="text-xs font-semibold text-emerald-400 print:text-black">
-                    Stratégie de négociation
-                  </p>
-                  <p className="text-xs text-slate-200 print:text-black">
-                    {fullReport.negotiationAdvice.argumentSummary}
-                  </p>
-                  <p className="text-[11px] text-slate-400 print:text-slate-700">
-                    {fullReport.negotiationAdvice.repairScopeDetail}
-                  </p>
-                </div>
-
-                <div className="space-y-1.5">
-                  <p className="text-xs font-semibold text-slate-200 print:text-black">
-                    Check-list interactive sur le terrain (à cocher devant le véhicule)
-                  </p>
-                  <ul className="space-y-1.5 text-xs text-slate-300 print:text-black">
-                    {fullReport.inspectionChecklist.map((item, idx) => {
-                      const isChecked = Boolean(checkedItems[idx]);
-                      return (
-                        <li key={idx}>
-                          <label className="flex items-start gap-2 cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={isChecked}
-                              onChange={() => toggleChecklistItem(idx)}
-                              className="mt-0.5 accent-emerald-500 shrink-0"
-                            />
-                            <span className={isChecked ? 'line-through text-slate-500' : ''}>
-                              {item}
-                            </span>
-                          </label>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </div>
-
-                <div className="space-y-2">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="text-xs font-semibold text-emerald-400 print:text-black">
-                      Message prêt à envoyer au vendeur
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        handleCopyText(fullReport.sellerMessages[messageTone], 'seller')
-                      }
-                      className="text-xs px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-100 cursor-pointer shrink-0 print:hidden"
-                    >
-                      {copiedKey === 'seller' ? 'Copié ✓' : 'Copier'}
-                    </button>
-                  </div>
-
-                  <div className="flex flex-wrap gap-1.5 print:hidden">
-                    <button
-                      type="button"
-                      onClick={() => setMessageTone('courtois')}
-                      className={`text-xs px-2.5 py-1 rounded-lg border cursor-pointer ${
-                        messageTone === 'courtois'
-                          ? 'bg-emerald-500 text-slate-950 border-emerald-400 font-semibold'
-                          : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
-                      }`}
-                    >
-                      Courtois & curieux
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setMessageTone('technique')}
-                      className={`text-xs px-2.5 py-1 rounded-lg border cursor-pointer ${
-                        messageTone === 'technique'
-                          ? 'bg-emerald-500 text-slate-950 border-emerald-400 font-semibold'
-                          : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
-                      }`}
-                    >
-                      Factuel & technique
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setMessageTone('negotiation')}
-                      className={`text-xs px-2.5 py-1 rounded-lg border cursor-pointer ${
-                        messageTone === 'negotiation'
-                          ? 'bg-emerald-500 text-slate-950 border-emerald-400 font-semibold'
-                          : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
-                      }`}
-                    >
-                      Négociation douce
-                    </button>
-                  </div>
-
-                  <pre className="rounded-lg bg-slate-950 border border-slate-800 p-3 text-xs text-slate-200 whitespace-pre-wrap print:bg-slate-100 print:text-black print:border-slate-300">
-                    {fullReport.sellerMessages[messageTone]}
-                  </pre>
-                </div>
-
-                {includeCerfaBump && (
-                  <div className="rounded-xl bg-slate-950 border border-amber-600/50 p-4 space-y-3 print:bg-white print:border-slate-300 print:text-black">
-                    <p className="text-xs font-bold uppercase tracking-wider text-amber-300 print:text-black">
-                      Pack Achat Serein & Lettre Recommandée (LRAR)
-                    </p>
-
-                    <div className="space-y-1.5">
-                      <p className="text-xs font-semibold text-slate-200 print:text-black">
-                        1. Démarches cession (Cerfa 15776*02) & immatriculation
-                      </p>
-                      <ol className="list-decimal list-inside text-xs text-slate-300 space-y-1 print:text-black">
-                        {fullReport.cerfaAndLitigationPack.cessionAndRegistrationSteps.map(
-                          (step, idx) => (
-                            <li key={idx}>{step}</li>
-                          )
-                        )}
-                      </ol>
-                    </div>
-
-                    <div className="space-y-2 pt-2 border-t border-slate-800 print:border-slate-300">
+                    <div className="space-y-2">
                       <div className="flex flex-wrap items-center justify-between gap-2">
-                        <p className="text-xs font-semibold text-amber-300 print:text-black">
-                          2. Modèle de Lettre Recommandée (LRAR — Litige / Vice caché)
+                        <p className="text-xs font-semibold text-emerald-400 print:text-black">
+                          Message prêt à envoyer au vendeur
                         </p>
-                        <div className="flex items-center gap-2 shrink-0 print:hidden">
-                          <button
-                            type="button"
-                            onClick={() => setExpandLetter((prev) => !prev)}
-                            className="text-xs px-2.5 py-1 rounded bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 cursor-pointer"
-                          >
-                            {expandLetter ? 'Réduire' : 'Afficher tout'}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              handleCopyText(
-                                fullReport.cerfaAndLitigationPack.registeredMailTemplate,
-                                'rar'
-                              )
-                            }
-                            className="text-xs px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-100 cursor-pointer"
-                          >
-                            {copiedKey === 'rar' ? 'Copié ✓' : 'Copier la lettre'}
-                          </button>
-                        </div>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleCopyText(fullReport.sellerMessages[messageTone], 'seller')
+                          }
+                          className="text-xs px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-100 cursor-pointer shrink-0 print:hidden"
+                        >
+                          {copiedKey === 'seller' ? 'Copié ✓' : 'Copier'}
+                        </button>
                       </div>
-                      <p className="text-[11px] text-amber-200/80 bg-amber-950/30 p-2 rounded border border-amber-800/40 print:bg-slate-100 print:text-black print:border-slate-300">
-                        ⚠️ <strong>Information documentaire & preuves :</strong> Remplacez tous les champs entre crochets <code>[...]</code> et adaptez le délai à votre situation. En cas de litige (notamment vice caché), la réunion de preuves objectives (factures, diagnostic, expertise) est déterminante. Ce modèle ne remplace pas l’avis d’un avocat ou d’une protection juridique.
-                      </p>
-                      <pre
-                        style={{ colorScheme: 'dark' }}
-                        className={`rounded-lg bg-slate-900 border border-slate-800 p-3 text-xs text-slate-200 whitespace-pre-wrap break-words print:bg-slate-100 print:text-black print:border-slate-300 print:overflow-visible ${
-                          expandLetter
-                            ? 'overflow-visible'
-                            : 'max-h-64 overflow-y-auto overflow-x-hidden'
-                        }`}
-                      >
-                        {fullReport.cerfaAndLitigationPack.registeredMailTemplate}
+
+                      <div className="flex flex-wrap gap-1.5 print:hidden">
+                        <button
+                          type="button"
+                          onClick={() => setMessageTone('courtois')}
+                          className={`text-xs px-2.5 py-1 rounded-lg border cursor-pointer ${
+                            messageTone === 'courtois'
+                              ? 'bg-emerald-500 text-slate-950 border-emerald-400 font-semibold'
+                              : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
+                          }`}
+                        >
+                          Courtois & curieux
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setMessageTone('technique')}
+                          className={`text-xs px-2.5 py-1 rounded-lg border cursor-pointer ${
+                            messageTone === 'technique'
+                              ? 'bg-emerald-500 text-slate-950 border-emerald-400 font-semibold'
+                              : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
+                          }`}
+                        >
+                          Factuel & technique
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setMessageTone('negotiation')}
+                          className={`text-xs px-2.5 py-1 rounded-lg border cursor-pointer ${
+                            messageTone === 'negotiation'
+                              ? 'bg-emerald-500 text-slate-950 border-emerald-400 font-semibold'
+                              : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
+                          }`}
+                        >
+                          Négociation douce
+                        </button>
+                      </div>
+
+                      <pre className="rounded-lg bg-slate-950 border border-slate-800 p-3 text-xs text-slate-200 whitespace-pre-wrap print:bg-slate-100 print:text-black print:border-slate-300">
+                        {fullReport.sellerMessages[messageTone]}
                       </pre>
                     </div>
+                  </div>
+                )}
+
+                {/* ONGLET 3 : INSPECTION TERRAIN (3 ÉTATS + PROGRESSION + NOTES) */}
+                {activeTab === 'inspection' && (
+                  <div className="space-y-4">
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-semibold text-slate-200 print:text-black">
+                          Progression de la visite
+                        </span>
+                        <span className="font-mono text-emerald-300 print:text-black">
+                          {checklistProgress.completed} / {checklistProgress.total} points vérifiés
+                        </span>
+                      </div>
+                      <div className="w-full h-2 rounded-full bg-slate-800 overflow-hidden print:bg-slate-200">
+                        <div
+                          className="h-full bg-emerald-500 transition-all duration-300"
+                          style={{ width: `${checklistProgress.percent}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    <ul className="space-y-2.5 text-xs">
+                      {fullReport.inspectionChecklist.map((item, idx) => {
+                        const status = checklistStates[idx] ?? 'pending';
+                        return (
+                          <li
+                            key={idx}
+                            className="rounded-lg bg-slate-950 border border-slate-800 p-3 space-y-2 print:bg-slate-100 print:border-slate-300"
+                          >
+                            <p
+                              className={
+                                status === 'ok'
+                                  ? 'text-slate-400 line-through print:text-black'
+                                  : 'text-slate-200 print:text-black'
+                              }
+                            >
+                              {item}
+                            </p>
+                            <div className="flex flex-wrap gap-1.5 print:hidden">
+                              <button
+                                type="button"
+                                onClick={() => updateCheckStatus(idx, 'ok')}
+                                className={`px-2.5 py-1 rounded-md border text-[11px] font-semibold cursor-pointer ${
+                                  status === 'ok'
+                                    ? 'bg-emerald-500 text-slate-950 border-emerald-400'
+                                    : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-slate-500'
+                                }`}
+                              >
+                                OK ✓
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => updateCheckStatus(idx, 'defect')}
+                                className={`px-2.5 py-1 rounded-md border text-[11px] font-semibold cursor-pointer ${
+                                  status === 'defect'
+                                    ? 'bg-red-500 text-slate-950 border-red-400'
+                                    : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-slate-500'
+                                }`}
+                              >
+                                Défaut ✕
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => updateCheckStatus(idx, 'verify')}
+                                className={`px-2.5 py-1 rounded-md border text-[11px] font-semibold cursor-pointer ${
+                                  status === 'verify'
+                                    ? 'bg-amber-400 text-slate-950 border-amber-300'
+                                    : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-slate-500'
+                                }`}
+                              >
+                                À vérifier ?
+                              </button>
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>
+
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-semibold text-slate-200 print:text-black">
+                        Note rapide de visite (sauvegardée automatiquement sur ce téléphone)
+                      </label>
+                      <textarea
+                        rows={3}
+                        value={fieldNote}
+                        onChange={(e) => handleFieldNoteChange(e.target.value)}
+                        placeholder="Ex. Pneus avant à 40 %, petit bruit à froid, carnet complet jusqu'à 72 000 km..."
+                        className="w-full rounded-lg bg-slate-950 border border-slate-800 p-3 text-xs text-slate-100 focus:outline-none focus:border-emerald-400 print:bg-slate-100 print:text-black print:border-slate-300"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* ONGLET 4 : ACHAT & PROTECTION */}
+                {activeTab === 'achat' && (
+                  <div className="space-y-4">
+                    {includeCerfaBump ? (
+                      <div className="rounded-xl bg-slate-950 border border-amber-600/50 p-4 space-y-3 print:bg-white print:border-slate-300 print:text-black">
+                        <p className="text-xs font-bold uppercase tracking-wider text-amber-300 print:text-black">
+                          Pack Achat Serein & Lettre Recommandée (LRAR)
+                        </p>
+
+                        <div className="space-y-1.5">
+                          <p className="text-xs font-semibold text-slate-200 print:text-black">
+                            1. Démarches cession (Cerfa 15776*02) & immatriculation
+                          </p>
+                          <ol className="list-decimal list-inside text-xs text-slate-300 space-y-1 print:text-black">
+                            {fullReport.cerfaAndLitigationPack.cessionAndRegistrationSteps.map(
+                              (step, idx) => (
+                                <li key={idx}>{step}</li>
+                              )
+                            )}
+                          </ol>
+                        </div>
+
+                        <div className="space-y-2 pt-2 border-t border-slate-800 print:border-slate-300">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <p className="text-xs font-semibold text-amber-300 print:text-black">
+                              2. Modèle de Lettre Recommandée (LRAR — Litige / Vice caché)
+                            </p>
+                            <div className="flex items-center gap-2 shrink-0 print:hidden">
+                              <button
+                                type="button"
+                                onClick={() => setExpandLetter((prev) => !prev)}
+                                className="text-xs px-2.5 py-1 rounded bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 cursor-pointer"
+                              >
+                                {expandLetter ? 'Réduire' : 'Afficher tout'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleCopyText(
+                                    fullReport.cerfaAndLitigationPack.registeredMailTemplate,
+                                    'rar'
+                                  )
+                                }
+                                className="text-xs px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-100 cursor-pointer"
+                              >
+                                {copiedKey === 'rar' ? 'Copié ✓' : 'Copier la lettre'}
+                              </button>
+                            </div>
+                          </div>
+                          <p className="text-[11px] text-amber-200/80 bg-amber-950/30 p-2 rounded border border-amber-800/40 print:bg-slate-100 print:text-black print:border-slate-300">
+                            ⚠️ <strong>Information documentaire & preuves :</strong> Remplacez tous les champs entre crochets <code>[...]</code> et adaptez le délai à votre situation. En cas de litige (notamment vice caché), la réunion de preuves objectives (factures, diagnostic, expertise) est déterminante. Ce modèle ne remplace pas l’avis d’un avocat ou d’une protection juridique.
+                          </p>
+                          <pre
+                            style={{ colorScheme: 'dark' }}
+                            className={`rounded-lg bg-slate-900 border border-slate-800 p-3 text-xs text-slate-200 whitespace-pre-wrap break-words print:bg-slate-100 print:text-black print:border-slate-300 print:overflow-visible ${
+                              expandLetter
+                                ? 'overflow-visible'
+                                : 'max-h-64 overflow-y-auto overflow-x-hidden'
+                            }`}
+                          >
+                            {fullReport.cerfaAndLitigationPack.registeredMailTemplate}
+                          </pre>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="rounded-xl bg-slate-950 border border-slate-800 p-4 space-y-3">
+                        <p className="text-xs font-bold uppercase tracking-wider text-amber-300">
+                          Pack Achat Serein non inclus
+                        </p>
+                        <p className="text-xs text-slate-300">
+                          Ajoutez le guide pas-à-pas cession (Cerfa 15776*02 / ANTS) et le modèle de Lettre Recommandée (LRAR) pour sécuriser la remise des clés et vous protéger en cas de vice caché.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => setIncludeCerfaBump(true)}
+                          className="rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 font-semibold px-3.5 py-2 text-xs transition cursor-pointer"
+                        >
+                          Activer le Pack Achat Serein (+9,90 €)
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -1341,7 +1629,7 @@ export default function HomePage() {
           </div>
         )}
 
-        {/* CHASSEUR DE CT : AFFICHÉ UNIQUEMENT APRÈS UNE ANALYSE ET TANT QUE LE PASS N'EST PAS ACTIF */}
+        {/* CHASSEUR DE CT : UNIQUEMENT APRÈS UNE ANALYSE ET SI LE PASS N'EST PAS ACTIF */}
         {evaluation && !isPassActive && (
           <form
             onSubmit={handleGenerateMagicLink}
@@ -1439,6 +1727,7 @@ export default function HomePage() {
         </footer>
       </div>
 
+      {/* BARRE STICKY MOBILE SI NON DÉBLOQUÉ */}
       {evaluation && !isUnlocked && fullReport && (
         <div className="sm:hidden fixed bottom-0 inset-x-0 z-30 bg-slate-950/95 border-t border-slate-800 px-4 py-2.5 flex items-center justify-between gap-3 print:hidden">
           <div className="min-w-0">
@@ -1451,6 +1740,42 @@ export default function HomePage() {
           >
             Débloquer le rapport — {totalPrice} €
           </a>
+        </div>
+      )}
+
+      {/* BARRE D'ACTIONS FLOTTANTE QUAND LE RAPPORT EST DÉBLOQUÉ */}
+      {evaluation && isUnlocked && fullReport && (
+        <div className="fixed bottom-0 inset-x-0 z-30 bg-slate-950/95 backdrop-blur border-t border-slate-800 px-4 py-2.5 print:hidden">
+          <div className="max-w-2xl mx-auto flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-xs font-semibold text-slate-100 truncate">
+                {fullReport.vehicleTitle}
+              </p>
+              <p className="text-[11px] text-slate-400">
+                Score : <strong>{evaluation.incompleteData ? 'À compléter' : `${evaluation.scoreRisque}/100`}</strong>
+              </p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={handleDownloadPdf}
+                className="rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold px-3 py-1.5 text-xs transition cursor-pointer"
+              >
+                PDF
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setResult(null);
+                  setExtraNotes('');
+                  resetAnalysisStates();
+                }}
+                className="rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-300 font-semibold px-3 py-1.5 text-xs transition cursor-pointer"
+              >
+                + Autre
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </main>
