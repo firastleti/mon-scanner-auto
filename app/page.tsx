@@ -68,13 +68,19 @@ function getHingeBadge(status: HingeStatus): { label: string; className: string 
 }
 
 function formatCritAirSource(rawSource: string): string {
-  if (rawSource === 'norme_euro') {
+  if (rawSource === 'norme_euro_v9') {
     return 'Selon la norme Euro inscrite sur le document';
   }
   if (rawSource === 'estimation_annee') {
     return 'Estimation selon l’année de mise en circulation';
   }
   return 'Estimation indicative';
+}
+
+function formatVerdictLabel(verdict: EngineEvaluationResult['verdict']): string {
+  if (verdict === 'RISQUE_ELEVE') return 'Risque élevé';
+  if (verdict === 'VIGILANCE') return 'Vigilance';
+  return 'Favorable';
 }
 
 export default function HomePage() {
@@ -150,10 +156,23 @@ export default function HomePage() {
     return (base + bump).toFixed(2).replace('.', ',');
   }, [includeCerfaBump]);
 
+  const priceBreakdownLabel = includeCerfaBump ? '19,90 € + 9,90 €' : '19,90 €';
+
   const fullReport: FullVehicleReport | null = useMemo(() => {
     if (!extraction || !evaluation) return null;
     return buildFullReport(extraction, evaluation);
   }, [extraction, evaluation]);
+
+  const evidenceReliabilityNotice = useMemo(() => {
+    if (!evaluation) return null;
+    if (isDemoMode) {
+      return 'Simulation d’exemple : basée sur un scénario de démonstration. Importez un document ou des notes réelles pour un cas concret.';
+    }
+    if (!result) {
+      return 'Fiabilité limitée — basée sur le texte/notes seuls : ajoutez le rapport Histovec, le contrôle technique ou la carte grise pour affiner l’analyse.';
+    }
+    return 'Fiabilité renforcée — document analysé. Croisez avec l’Histovec, les factures et l’inspection physique avant achat.';
+  }, [evaluation, isDemoMode, result]);
 
   function syncManualInputs(ext: VehicleExtraction) {
     setManualMotor(ext.motorisation_texte ?? '');
@@ -479,12 +498,18 @@ export default function HomePage() {
               <span
                 className={`px-3 py-1 rounded-full border text-xs font-bold ${verdictBadgeClass}`}
               >
-                {evaluation.verdict}
+                {formatVerdictLabel(evaluation.verdict)}
               </span>
               <span className="text-sm font-mono text-slate-300 whitespace-nowrap">
                 Score de risque : <strong>{evaluation.scoreRisque} / 100</strong>
               </span>
             </div>
+
+            {evidenceReliabilityNotice && (
+              <p className="rounded-lg bg-slate-900 border border-slate-800 px-3 py-2 text-xs text-slate-300">
+                {evidenceReliabilityNotice}
+              </p>
+            )}
 
             {evaluation.postOcrValidation.needsManualConfirmation && (
               <form
@@ -618,7 +643,6 @@ export default function HomePage() {
               </div>
             )}
 
-            {/* TEASER GRATUIT + PAYWALL */}
             {!isUnlocked && fullReport && (
               <div className="rounded-xl bg-slate-900 border border-emerald-700/50 p-4 space-y-4">
                 <div className="flex items-start justify-between gap-4">
@@ -630,12 +654,16 @@ export default function HomePage() {
                       Inclut la check-list d’inspection complète, la marge de négociation chiffrée et le message vendeur prêt à envoyer.
                     </p>
                   </div>
-                  <span className="text-lg font-bold text-white whitespace-nowrap shrink-0">
-                    {totalPrice} €
-                  </span>
+                  <div className="text-right shrink-0">
+                    <span className="text-lg font-bold text-white whitespace-nowrap block">
+                      {totalPrice} €
+                    </span>
+                    <span className="text-[11px] text-slate-400 block">
+                      {priceBreakdownLabel}
+                    </span>
+                  </div>
                 </div>
 
-                {/* APERÇU GRATUIT (TEASER) */}
                 <div className="rounded-lg bg-slate-950/80 border border-slate-800 p-3 space-y-2 relative overflow-hidden">
                   <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
                     Aperçu de votre check-list sur place :
@@ -686,12 +714,11 @@ export default function HomePage() {
                   onClick={handleLocalTestUnlock}
                   className="w-full rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold py-2.5 text-sm transition cursor-pointer"
                 >
-                  Débloquer le rapport complet ({totalPrice} € — mode test)
+                  Débloquer le rapport complet ({totalPrice} € — {priceBreakdownLabel}, mode test)
                 </button>
               </div>
             )}
 
-            {/* RAPPORT DÉBLOQUÉ */}
             {isUnlocked && fullReport && (
               <div className="rounded-xl bg-slate-900 border border-emerald-600/60 p-4 space-y-4 text-sm">
                 <div className="flex items-center justify-between gap-2 border-b border-slate-800 pb-2">
@@ -804,7 +831,6 @@ export default function HomePage() {
           </div>
         )}
 
-        {/* CHASSEUR DE CT (MAGIC LINK) REMONTÉ DANS LE TUNNEL */}
         <form
           onSubmit={handleGenerateMagicLink}
           className="rounded-xl bg-slate-950 border border-slate-800 p-4 space-y-3"
