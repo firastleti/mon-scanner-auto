@@ -92,6 +92,7 @@ export default function HomePage() {
   const [extraction, setExtraction] = useState<VehicleExtraction | null>(null);
   const [evaluation, setEvaluation] = useState<EngineEvaluationResult | null>(null);
   const [isDemoMode, setIsDemoMode] = useState(false);
+  const [isLocalHost, setIsLocalHost] = useState(false);
 
   const [manualMotor, setManualMotor] = useState('');
   const [manualYear, setManualYear] = useState('');
@@ -115,8 +116,11 @@ export default function HomePage() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const params = new URLSearchParams(window.location.search);
+    setIsLocalHost(
+      window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+    );
 
+    const params = new URLSearchParams(window.location.search);
     const mlToken = params.get('ml');
     if (mlToken) {
       fetch(`/api/magic-link?token=${encodeURIComponent(mlToken)}`)
@@ -161,6 +165,43 @@ export default function HomePage() {
     if (!extraction || !evaluation) return null;
     return buildFullReport(extraction, evaluation);
   }, [extraction, evaluation]);
+
+  const documentCrossChecks = useMemo(() => {
+    if (!extraction || !result) return [];
+    const items: string[] = [];
+
+    if (extraction.releves_kilometrage.length > 0) {
+      const formattedReadings = extraction.releves_kilometrage
+        .map((r) => `${r.km.toLocaleString('fr-FR')} km (${r.source}${r.date ? `, ${r.date}` : ''})`)
+        .join(' → ');
+      items.push(`Relevés kilométriques détectés : ${formattedReadings}.`);
+    }
+
+    if (extraction.defauts_utac.length > 0) {
+      const defectLabels = extraction.defauts_utac
+        .slice(0, 3)
+        .map((d) => `${d.libelle} (${d.gravite})`)
+        .join(' ; ');
+      items.push(`Contrôle technique : ${defectLabels}.`);
+    }
+
+    if (extraction.vin || extraction.cnit || extraction.norme_euro) {
+      const metaParts = [
+        extraction.vin ? `VIN : ${extraction.vin}` : null,
+        extraction.cnit ? `CNIT : ${extraction.cnit}` : null,
+        extraction.norme_euro ? `Norme : ${extraction.norme_euro}` : null,
+      ].filter(Boolean);
+      items.push(`Identification documentaire : ${metaParts.join(' • ')}.`);
+    }
+
+    if (items.length === 0) {
+      items.push(
+        `Document ${result.fileName} pris en compte : vérifiez que le rapport Histovec complet et le contrôle technique sont joints pour croiser l’historique et le kilométrage.`
+      );
+    }
+
+    return items;
+  }, [extraction, result]);
 
   const evidenceReliabilityNotice = useMemo(() => {
     if (!evaluation) return null;
@@ -384,6 +425,10 @@ export default function HomePage() {
     ? getHingeBadge(evaluation.matchedEngine.hingeStatus)
     : null;
 
+  const unlockButtonLabel = isLocalHost
+    ? `Débloquer le rapport complet (${totalPrice} € — mode test)`
+    : `Débloquer le rapport complet — ${totalPrice} €`;
+
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100 p-4 sm:p-6 flex flex-col items-center justify-center">
       <div className="w-full max-w-2xl rounded-2xl border border-slate-800 bg-slate-900 p-5 sm:p-6 space-y-5">
@@ -509,6 +554,19 @@ export default function HomePage() {
               <p className="rounded-lg bg-slate-900 border border-slate-800 px-3 py-2 text-xs text-slate-300">
                 {evidenceReliabilityNotice}
               </p>
+            )}
+
+            {documentCrossChecks.length > 0 && (
+              <div className="rounded-lg bg-slate-900 p-3 border border-slate-800 text-xs space-y-1.5">
+                <p className="font-semibold text-emerald-300">
+                  Contrôles & recoupements sur le document fourni
+                </p>
+                <ul className="list-disc list-inside text-slate-200 space-y-1">
+                  {documentCrossChecks.map((item, idx) => (
+                    <li key={idx}>{item}</li>
+                  ))}
+                </ul>
+              </div>
             )}
 
             {evaluation.postOcrValidation.needsManualConfirmation && (
@@ -651,7 +709,7 @@ export default function HomePage() {
                       Pass 30 jours — Rapport complet & Négociation
                     </p>
                     <p className="text-xs text-slate-400 mt-0.5">
-                      Inclut la check-list d’inspection complète, la marge de négociation chiffrée et le message vendeur prêt à envoyer.
+                      Valable 30 jours (analyses multiples incluses). Inclut check-list, marge de négociation et message vendeur.
                     </p>
                   </div>
                   <div className="text-right shrink-0">
@@ -714,18 +772,20 @@ export default function HomePage() {
                   onClick={handleLocalTestUnlock}
                   className="w-full rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold py-2.5 text-sm transition cursor-pointer"
                 >
-                  Débloquer le rapport complet ({totalPrice} € — mode test)
+                  {unlockButtonLabel}
                 </button>
               </div>
             )}
 
             {isUnlocked && fullReport && (
               <div className="rounded-xl bg-slate-900 border border-emerald-600/60 p-4 space-y-4 text-sm">
-                <div className="flex items-center justify-between gap-2 border-b border-slate-800 pb-2">
-                  <div>
-                    <p className="text-xs uppercase tracking-wider text-emerald-400 font-semibold">
-                      Pass 30 jours actif — Rapport détaillé
-                      {includeCerfaBump ? ' + Pack Démarches/LRAR' : ''}
+                <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 border-b border-slate-800 pb-3">
+                  <div className="min-w-0">
+                    <p className="text-[11px] uppercase tracking-wider text-emerald-400 font-semibold">
+                      Pass 30 jours actif — Rapport & Pack LRAR
+                    </p>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      Valable 30 jours • analyses multiples incluses
                     </p>
                     <p className="font-semibold mt-1">{fullReport.vehicleTitle}</p>
                   </div>
@@ -736,7 +796,7 @@ export default function HomePage() {
                       setExtraNotes('');
                       resetAnalysisStates();
                     }}
-                    className="text-xs px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-300 shrink-0 cursor-pointer"
+                    className="text-xs px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-300 shrink-0 cursor-pointer self-start"
                   >
                     + Analyser un autre véhicule
                   </button>
@@ -855,6 +915,9 @@ export default function HomePage() {
             </p>
             <p className="text-xs text-slate-400 mt-0.5">
               Pas encore le rapport Histovec ou le contrôle technique ? Recevez un lien par email pour relancer l’analyse dès que le vendeur vous les envoie.
+            </p>
+            <p className="text-[11px] text-slate-500 mt-1">
+              🔒 Votre adresse e-mail et le rappel du véhicule servent uniquement à vous envoyer le lien de reprise et ne sont pas utilisés à d’autres fins.
             </p>
           </div>
 

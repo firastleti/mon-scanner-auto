@@ -77,9 +77,44 @@ export function buildFullReport(
     );
   }
 
+  const missingDocQuestions: string[] = [];
+  const hasMileageReadings =
+    Array.isArray(extraction.releves_kilometrage) && extraction.releves_kilometrage.length > 0;
+  const hasUtacDefects =
+    Array.isArray(extraction.defauts_utac) && extraction.defauts_utac.length > 0;
+
+  if (!hasMileageReadings) {
+    missingDocQuestions.push(
+      'Pouvez-vous me transmettre le rapport Histovec complet ainsi que l’historique des relevés kilométriques ?'
+    );
+  }
+  if (!hasUtacDefects && !hasMileageReadings) {
+    missingDocQuestions.push(
+      'Pouvez-vous m’envoyer le dernier procès-verbal de contrôle technique (même s’il est récent ou vierge) ?'
+    );
+  }
+
+  const engineQuestion = evaluation.matchedEngine
+    ? `Concernant la motorisation (${evaluation.matchedEngine.label}), pouvez-vous me confirmer l’historique d’entretien et me transmettre les factures correspondantes (pièces, dates et kilométrages) ?`
+    : null;
+
+  const alertQuestion =
+    evaluation.alerts.length > 0
+      ? `Sur les points d’attention relevés (${evaluation.alerts[0]}), avez-vous des justificatifs ou précisions à apporter ?`
+      : null;
+
+  const combinedQuestions = Array.from(
+    new Set([
+      ...missingDocQuestions,
+      ...(engineQuestion ? [engineQuestion] : []),
+      ...(alertQuestion ? [alertQuestion] : []),
+      ...evaluation.sellerQuestions,
+    ])
+  ).slice(0, 4);
+
   const questionsBlock =
-    evaluation.sellerQuestions.length > 0
-      ? evaluation.sellerQuestions.map((q) => `- ${q}`).join('\n')
+    combinedQuestions.length > 0
+      ? combinedQuestions.map((q) => `- ${q}`).join('\n')
       : '- Pouvez-vous me transmettre le rapport Histovec complet ainsi que le dernier contrôle technique ?\n- Avez-vous l’historique des factures d’entretien ?';
 
   const sellerMessageScript = `Bonjour, je suis intéressé par votre annonce (${vehicleTitle}). Avant de me déplacer, pourriez-vous me préciser :\n${questionsBlock}\nMerci d’avance pour votre retour.`;
