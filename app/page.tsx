@@ -581,7 +581,7 @@ export default function HomePage() {
             {documentCrossChecks.length > 0 && (
               <div className="rounded-lg bg-slate-900 p-3 border border-slate-800 text-xs space-y-1.5">
                 <p className="font-semibold text-emerald-300">
-                  Contrôles & recoupements sur le document fourni
+                  Contrôles & recoupements sur le document analysé
                 </p>
                 <ul className="list-disc list-inside text-slate-200 space-y-1">
                   {documentCrossChecks.map((item, idx) => (
@@ -771,9 +771,16 @@ export default function HomePage() {
                     className="mt-0.5 accent-emerald-500 shrink-0"
                   />
                   <div className="space-y-1">
-                    <p className="font-semibold text-amber-300">
-                      Option (+9,90 €) : Pack Démarches & Protection Litige
-                    </p>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="font-semibold text-amber-300">
+                        Option (+9,90 €) : Pack Démarches & Protection Litige
+                      </p>
+                      {includeCerfaBump && (
+                        <span className="text-[11px] font-semibold text-emerald-300">
+                          Total : 29,80 €
+                        </span>
+                      )}
+                    </div>
                     <ul className="list-disc list-inside text-[11px] text-slate-300 space-y-0.5">
                       <li><strong>Avant l’achat :</strong> Guide pas-à-pas cession (Cerfa 15776*02) & ANTS.</li>
                       <li><strong>Après l’achat :</strong> Modèle de Lettre Recommandée (LRAR) pour vice caché.</li>
@@ -915,8 +922,10 @@ export default function HomePage() {
                       </p>
                       <pre
                         style={{ colorScheme: 'dark' }}
-                        className={`rounded-lg bg-slate-900 border border-slate-800 p-3 text-xs text-slate-200 whitespace-pre-wrap ${
-                          expandLetter ? '' : 'max-h-64 overflow-auto'
+                        className={`rounded-lg bg-slate-900 border border-slate-800 p-3 text-xs text-slate-200 whitespace-pre-wrap break-words ${
+                          expandLetter
+                            ? 'overflow-visible'
+                            : 'max-h-64 overflow-y-auto overflow-x-hidden'
                         }`}
                       >
                         {fullReport.cerfaAndLitigationPack.registeredMailTemplate}
