@@ -25,6 +25,8 @@ export type EvaluationVerdict =
   | 'VIGILANCE'
   | 'RISQUE_ELEVE';
 
+export type CostTier = 'none' | 'low' | 'moderate' | 'high';
+
 export interface MileageConsistencyResult {
   status: 'coherent' | 'suspicious_low' | 'high_mileage' | 'unknown';
   expectedAnnualKm: number | null;
@@ -69,6 +71,8 @@ export interface EngineEvaluationResult {
   scoreRisque: number;
   incompleteData: boolean;
   verdict: EvaluationVerdict;
+  costTier: CostTier;
+  costTierLabel: string;
   estimatedRepairCost: {
     independant: number;
     concession: number;
@@ -516,6 +520,19 @@ export function computeCritAir(
   }
 }
 
+function buildCostTier(indepCost: number): { tier: CostTier; label: string } {
+  if (indepCost <= 0) {
+    return { tier: 'none', label: 'Aucun poste chiffré' };
+  }
+  if (indepCost > 900) {
+    return { tier: 'high', label: 'Élevé (> 900 €)' };
+  }
+  if (indepCost >= 300) {
+    return { tier: 'moderate', label: 'Modéré (300 € – 900 €)' };
+  }
+  return { tier: 'low', label: 'Faible (< 300 €)' };
+}
+
 export function evaluateVehicle(extraction: VehicleExtraction): EngineEvaluationResult {
   const entretienMentions = Array.isArray(extraction.entretien_mentions)
     ? extraction.entretien_mentions
@@ -629,15 +646,15 @@ export function evaluateVehicle(extraction: VehicleExtraction): EngineEvaluation
       }
 
       if (proof.hasToDo || proof.hasDefect) {
-        const exposureBonus = isBeforeFix && kmVal >= 60000 ? 12 : 4;
-        rawScore += 32 + exposureBonus;
+        const exposureBonus = isBeforeFix && kmVal >= 60000 ? 22 : 10;
+        rawScore += 42 + exposureBonus;
         intrinsicRisk = {
           organGroup: rule.organGroup,
           costIndep: rule.costIndep,
           costDealer: rule.costDealer,
         };
         alerts.push(
-          `${rule.label} : intervention à prévoir ou défaut signalé (${rule.riskTitle}). ${rule.repairScopeNote}`
+          `${rule.label} : intervention à prévoir ou défaut signalé (${rule.riskTitle}).`
         );
         sellerQuestions.push(
           `Pouvez-vous préciser l’historique et le devis/facture concernant : ${rule.label} ?`
@@ -648,30 +665,26 @@ export function evaluateVehicle(extraction: VehicleExtraction): EngineEvaluation
           `${rule.label} : justificatif d’intervention relevé (vérifier date, kilométrage et détail des pièces sur la facture).`
         );
       } else if (proof.hasDeclaredProof) {
-        const exposureBonus = isBeforeFix && kmVal >= 60000 ? 10 : 0;
-        rawScore += 22 + exposureBonus;
+        const exposureBonus = isBeforeFix && kmVal >= 60000 ? 16 : 6;
+        rawScore += 28 + exposureBonus;
         intrinsicRisk = {
           organGroup: rule.organGroup,
           costIndep: Math.round(rule.costIndep * 0.65),
           costDealer: Math.round(rule.costDealer * 0.65),
         };
-        alerts.push(
-          `${rule.label} : entretien déclaré sans facture jointe (${rule.repairScopeNote}).`
-        );
+        alerts.push(`${rule.label} : entretien déclaré sans facture jointe.`);
         sellerQuestions.push(
           `L’entretien lié à (${rule.label}) est mentionné : avez-vous la facture détaillée à transmettre ?`
         );
       } else if (isBeforeFix) {
-        const exposureBonus = kmVal >= 75000 ? 14 : kmVal >= 50000 ? 8 : 0;
-        rawScore += 28 + exposureBonus;
+        const exposureBonus = kmVal >= 75000 ? 24 : kmVal >= 50000 ? 14 : 6;
+        rawScore += 36 + exposureBonus;
         intrinsicRisk = {
           organGroup: rule.organGroup,
           costIndep: rule.costIndep,
           costDealer: rule.costDealer,
         };
-        alerts.push(
-          `${rule.riskTitle} — aucun justificatif d’entretien détecté à ce stade. ${rule.repairScopeNote}`
-        );
+        alerts.push(`${rule.riskTitle} — aucun justificatif d’entretien détecté à ce stade.`);
         sellerQuestions.push(
           `Quel est l’historique d’entretien exact de ce moteur (${rule.label}) et avez-vous les factures correspondantes ?`
         );
@@ -739,6 +752,8 @@ export function evaluateVehicle(extraction: VehicleExtraction): EngineEvaluation
       scoreRisque: 0,
       incompleteData: true,
       verdict: 'DONNEES_INCOMPLETES',
+      costTier: 'none',
+      costTierLabel: 'Aucun poste chiffré',
       estimatedRepairCost: {
         independant: 0,
         concession: 0,
@@ -763,6 +778,10 @@ export function evaluateVehicle(extraction: VehicleExtraction): EngineEvaluation
     verdict = 'VIGILANCE';
   }
 
+  const roundedIndep = Math.round(totalIndep / 10) * 10;
+  const roundedDealer = Math.round(totalDealer / 10) * 10;
+  const tierInfo = buildCostTier(roundedIndep);
+
   return {
     matchedEngine: matchedEngineResult,
     mileageCheck,
@@ -770,9 +789,11 @@ export function evaluateVehicle(extraction: VehicleExtraction): EngineEvaluation
     scoreRisque,
     incompleteData: false,
     verdict,
+    costTier: tierInfo.tier,
+    costTierLabel: tierInfo.label,
     estimatedRepairCost: {
-      independant: Math.round(totalIndep / 10) * 10,
-      concession: Math.round(totalDealer / 10) * 10,
+      independant: roundedIndep,
+      concession: roundedDealer,
     },
     critAir: computeCritAir(extraction),
     alerts,

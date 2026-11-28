@@ -4,7 +4,11 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { processUploadedFile, ProcessedUpload } from '@/lib/fileProcessor';
 import type { VehicleExtraction } from '@/lib/geminiExtractor';
 import type { EngineEvaluationResult, HingeStatus } from '@/lib/engineRules';
-import { buildFullReport, FullVehicleReport } from '@/lib/reportGenerator';
+import {
+  buildFullReport,
+  FullVehicleReport,
+  SellerMessageTone,
+} from '@/lib/reportGenerator';
 
 const DEMO_SCENARIO: {
   label: string;
@@ -12,7 +16,7 @@ const DEMO_SCENARIO: {
   mockExtraction: VehicleExtraction;
 } = {
   label: 'Exemple : Peugeot 208 1.2 PureTech (06/2019 — 88 000 km)',
-  notes: 'Peugeot 208 1.2 PureTech 06/2019, 88 000 km, courroie à prévoir, CT vierge.',
+  notes: 'Peugeot 208 1.2 PureTech 06/2019, 88 000 km, courroie à prévoir, CT vierge, 9 500 €.',
   mockExtraction: {
     marque: 'Peugeot',
     modele: '208',
@@ -102,6 +106,7 @@ export default function HomePage() {
   const [evaluation, setEvaluation] = useState<EngineEvaluationResult | null>(null);
   const [isDemoMode, setIsDemoMode] = useState(false);
   const [isLocalHost, setIsLocalHost] = useState(false);
+  const [showDebugJson, setShowDebugJson] = useState(false);
 
   const [manualMotor, setManualMotor] = useState('');
   const [manualYear, setManualYear] = useState('');
@@ -113,6 +118,8 @@ export default function HomePage() {
   const [isUnlocked, setIsUnlocked] = useState(false);
   const [restoredAccess, setRestoredAccess] = useState(false);
   const [expandLetter, setExpandLetter] = useState(false);
+  const [messageTone, setMessageTone] = useState<SellerMessageTone>('courtois');
+  const [checkedItems, setCheckedItems] = useState<Record<number, boolean>>({});
   const [copiedKey, setCopiedKey] = useState<'seller' | 'rar' | 'magic' | null>(null);
 
   const [hunterEmail, setHunterEmail] = useState('');
@@ -125,11 +132,13 @@ export default function HomePage() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    setIsLocalHost(
-      window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-    );
+    const local =
+      window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    setIsLocalHost(local);
 
     const params = new URLSearchParams(window.location.search);
+    setShowDebugJson(local || params.get('debug') === '1');
+
     const mlToken = params.get('ml');
     if (mlToken) {
       fetch(`/api/magic-link?token=${encodeURIComponent(mlToken)}`)
@@ -172,8 +181,8 @@ export default function HomePage() {
 
   const fullReport: FullVehicleReport | null = useMemo(() => {
     if (!extraction || !evaluation) return null;
-    return buildFullReport(extraction, evaluation);
-  }, [extraction, evaluation]);
+    return buildFullReport(extraction, evaluation, extraNotes);
+  }, [extraction, evaluation, extraNotes]);
 
   const documentCrossChecks = useMemo(() => {
     if (!extraction || !result) return [];
@@ -239,6 +248,7 @@ export default function HomePage() {
     setEvaluation(null);
     setIsDemoMode(false);
     setExpandLetter(false);
+    setCheckedItems({});
     if (!restoredAccess) {
       setIsUnlocked(false);
     }
@@ -426,6 +436,14 @@ export default function HomePage() {
     setTimeout(() => setCopiedKey(null), 2000);
   }
 
+  function handleExportPdf() {
+    if (typeof window === 'undefined') return;
+    setExpandLetter(true);
+    setTimeout(() => {
+      window.print();
+    }, 100);
+  }
+
   const verdictBadgeClass =
     evaluation?.verdict === 'RISQUE_ELEVE'
       ? 'bg-red-950 text-red-300 border-red-700'
@@ -435,6 +453,13 @@ export default function HomePage() {
           ? 'bg-slate-800 text-slate-300 border-slate-600'
           : 'bg-emerald-950 text-emerald-300 border-emerald-700';
 
+  const gaugeBarClass =
+    evaluation?.verdict === 'RISQUE_ELEVE'
+      ? 'bg-red-500'
+      : evaluation?.verdict === 'VIGILANCE'
+        ? 'bg-amber-400'
+        : 'bg-emerald-500';
+
   const hingeBadge = evaluation?.matchedEngine
     ? getHingeBadge(evaluation.matchedEngine.hingeStatus)
     : null;
@@ -443,14 +468,23 @@ export default function HomePage() {
     ? `Débloquer le rapport complet (${totalPrice} € — mode test)`
     : `Débloquer le rapport complet — ${totalPrice} €`;
 
+  const roiAnchorText =
+    fullReport && fullReport.negotiationAdvice.suggestedDiscountDealer > 0
+      ? `Investissez ${totalPrice} € pour sécuriser votre achat et viser jusqu’à ${fullReport.negotiationAdvice.suggestedDiscountDealer.toLocaleString(
+          'fr-FR'
+        )} € d’argumentaire de négociation.`
+      : `Investissez ${totalPrice} € pour obtenir la check-list terrain, la stratégie de négociation et les messages vendeur prêts à l’envoi.`;
+
+  const isPassActive = isUnlocked || restoredAccess;
+
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-100 p-4 sm:p-6 flex flex-col items-center justify-center">
-      <div className="w-full max-w-2xl rounded-2xl border border-slate-800 bg-slate-900 p-5 sm:p-6 space-y-5">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+    <main className="min-h-screen bg-slate-950 text-slate-100 p-4 sm:p-6 flex flex-col items-center justify-center print:bg-white print:text-black print:p-0">
+      <div className="w-full max-w-2xl rounded-2xl border border-slate-800 bg-slate-900 p-5 sm:p-6 space-y-5 print:border-none print:bg-white print:max-w-none print:p-4">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 print:hidden">
           <div>
             <h1 className="text-xl font-bold">Scanner Auto</h1>
             <p className="text-sm text-slate-400 mt-0.5">
-              Importe un document/photo ou colle une annonce pour estimer les risques et réparations.
+              Collez le texte d’une annonce (Leboncoin, La Centrale…) ou importez un document/photo pour estimer les risques.
             </p>
           </div>
           <button
@@ -464,12 +498,12 @@ export default function HomePage() {
         </div>
 
         {restoredBanner && (
-          <div className="rounded-xl bg-emerald-950/50 border border-emerald-700/60 p-3 text-xs text-emerald-200">
+          <div className="rounded-xl bg-emerald-950/50 border border-emerald-700/60 p-3 text-xs text-emerald-200 print:hidden">
             {restoredBanner}
           </div>
         )}
 
-        <label className="block cursor-pointer rounded-xl border border-dashed border-slate-600 hover:border-emerald-400 transition p-5 text-center">
+        <label className="block cursor-pointer rounded-xl border border-dashed border-slate-600 hover:border-emerald-400 transition p-5 text-center print:hidden">
           <span className="text-sm font-medium text-emerald-400">
             Choisir un fichier (Image, HEIC, PDF)
           </span>
@@ -487,15 +521,15 @@ export default function HomePage() {
           />
         </label>
 
-        <div>
+        <div className="print:hidden">
           <label className="block text-xs text-slate-400 mb-1">
-            Texte d’annonce / notes (optionnel)
+            Copiez-collez le texte de l’annonce ou vos notes (optionnel)
           </label>
           <textarea
             rows={3}
             value={extraNotes}
             onChange={(e) => setExtraNotes(e.target.value)}
-            placeholder="Ex. Peugeot 208 1.2 PureTech 06/2019, 88 000 km, courroie à prévoir..."
+            placeholder="Ex. Peugeot 208 1.2 PureTech 06/2019, 88 000 km, courroie à prévoir, 9 500 €..."
             className="w-full rounded-xl bg-slate-950 border border-slate-800 p-3 text-sm text-slate-100 focus:outline-none focus:border-emerald-400"
           />
         </div>
@@ -504,7 +538,7 @@ export default function HomePage() {
           type="button"
           onClick={handleAnalyze}
           disabled={loadingFile || loadingAi || (!result && !extraNotes.trim())}
-          className="w-full rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 text-slate-950 font-semibold py-2.5 text-sm transition cursor-pointer"
+          className="w-full rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 text-slate-950 font-semibold py-2.5 text-sm transition cursor-pointer print:hidden"
         >
           {loadingAi ? 'Analyse IA + Moteur en cours...' : 'Analyser le véhicule'}
         </button>
@@ -520,7 +554,7 @@ export default function HomePage() {
         )}
 
         {result && (
-          <div className="rounded-xl bg-slate-950 border border-slate-800 p-4 space-y-2 text-sm">
+          <div className="rounded-xl bg-slate-950 border border-slate-800 p-4 space-y-2 text-sm print:hidden">
             <div className="flex items-center justify-between gap-2">
               <span className="text-slate-400">Fichier :</span>
               <span className="font-mono text-xs sm:text-sm truncate">
@@ -536,9 +570,9 @@ export default function HomePage() {
         )}
 
         {evaluation && (
-          <div className="rounded-xl bg-slate-950 border border-slate-800 p-4 space-y-4">
+          <div className="rounded-xl bg-slate-950 border border-slate-800 p-4 space-y-4 print:bg-white print:border-slate-300 print:text-black">
             {isDemoMode && (
-              <div className="rounded-lg bg-indigo-950/50 border border-indigo-700/60 px-3 py-2 text-xs text-indigo-200 flex items-center justify-between">
+              <div className="rounded-lg bg-indigo-950/50 border border-indigo-700/60 px-3 py-2 text-xs text-indigo-200 flex items-center justify-between print:hidden">
                 <span>💡 Ceci est une simulation d’exemple (Peugeot 208).</span>
                 <button
                   type="button"
@@ -553,37 +587,48 @@ export default function HomePage() {
               </div>
             )}
 
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span
-                className={`px-3 py-1 rounded-full border text-xs font-bold ${verdictBadgeClass}`}
-              >
-                {formatVerdictLabel(evaluation.verdict)}
-              </span>
-              <span className="text-sm font-mono text-slate-300 whitespace-nowrap">
-                {evaluation.incompleteData ? (
-                  <>
-                    Score de risque : <strong>À compléter</strong>
-                  </>
-                ) : (
-                  <>
-                    Score de risque : <strong>{evaluation.scoreRisque} / 100</strong>
-                  </>
-                )}
-              </span>
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span
+                  className={`px-3 py-1 rounded-full border text-xs font-bold ${verdictBadgeClass}`}
+                >
+                  {formatVerdictLabel(evaluation.verdict)}
+                </span>
+                <span className="text-sm font-mono text-slate-300 whitespace-nowrap print:text-black">
+                  {evaluation.incompleteData ? (
+                    <>
+                      Score de risque : <strong>À compléter</strong>
+                    </>
+                  ) : (
+                    <>
+                      Score de risque : <strong>{evaluation.scoreRisque} / 100</strong>
+                    </>
+                  )}
+                </span>
+              </div>
+
+              {!evaluation.incompleteData && (
+                <div className="w-full h-2.5 rounded-full bg-slate-800 overflow-hidden print:bg-slate-200">
+                  <div
+                    className={`h-full transition-all duration-300 ${gaugeBarClass}`}
+                    style={{ width: `${evaluation.scoreRisque}%` }}
+                  />
+                </div>
+              )}
             </div>
 
             {evidenceReliabilityNotice && (
-              <p className="rounded-lg bg-slate-900 border border-slate-800 px-3 py-2 text-xs text-slate-300">
+              <p className="rounded-lg bg-slate-900 border border-slate-800 px-3 py-2 text-xs text-slate-300 print:bg-slate-100 print:text-black print:border-slate-300">
                 {evidenceReliabilityNotice}
               </p>
             )}
 
             {documentCrossChecks.length > 0 && (
-              <div className="rounded-lg bg-slate-900 p-3 border border-slate-800 text-xs space-y-1.5">
-                <p className="font-semibold text-emerald-300">
+              <div className="rounded-lg bg-slate-900 p-3 border border-slate-800 text-xs space-y-1.5 print:bg-slate-100 print:text-black print:border-slate-300">
+                <p className="font-semibold text-emerald-300 print:text-black">
                   Contrôles & recoupements sur le document analysé
                 </p>
-                <ul className="list-disc list-inside text-slate-200 space-y-1">
+                <ul className="list-disc list-inside text-slate-200 space-y-1 print:text-black">
                   {documentCrossChecks.map((item, idx) => (
                     <li key={idx}>{item}</li>
                   ))}
@@ -594,7 +639,7 @@ export default function HomePage() {
             {evaluation.postOcrValidation.needsManualConfirmation && (
               <form
                 onSubmit={handleApplyManualCorrection}
-                className="rounded-xl bg-amber-950/40 border border-amber-600/60 p-4 space-y-3"
+                className="rounded-xl bg-amber-950/40 border border-amber-600/60 p-4 space-y-3 print:hidden"
               >
                 <div>
                   <p className="text-xs font-bold uppercase tracking-wider text-amber-300">
@@ -664,34 +709,49 @@ export default function HomePage() {
             )}
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-              <div className="rounded-lg bg-slate-900 p-3 border border-slate-800">
-                <p className="text-xs text-slate-400">Estimation réparations préventives</p>
-                <p className="mt-1 font-semibold">
-                  Indépendant : {evaluation.estimatedRepairCost.independant} €
+              <div className="rounded-lg bg-slate-900 p-3 border border-slate-800 print:bg-slate-100 print:border-slate-300">
+                <p className="text-xs text-slate-400 print:text-slate-700">
+                  Niveau de coût potentiel
                 </p>
-                <p className="text-xs text-slate-300">
-                  Concession : {evaluation.estimatedRepairCost.concession} €
-                </p>
-                <p className="text-[11px] text-slate-500 mt-1">
-                  Hors casse moteur majeure ou turbo.
-                </p>
+                {!isUnlocked ? (
+                  <>
+                    <p className="mt-1 font-semibold">{evaluation.costTierLabel}</p>
+                    <p className="text-[11px] text-slate-400 mt-1 print:text-slate-700">
+                      Montant détaillé (indépendant vs concession) inclus dans le rapport complet.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="mt-1 font-semibold">
+                      Indépendant : {evaluation.estimatedRepairCost.independant.toLocaleString('fr-FR')} €
+                    </p>
+                    <p className="text-xs text-slate-300 print:text-black">
+                      Concession : {evaluation.estimatedRepairCost.concession.toLocaleString('fr-FR')} €
+                    </p>
+                    <p className="text-[11px] text-slate-500 mt-1 print:text-slate-700">
+                      Travaux préventifs indicatifs (hors casse moteur ou turbo).
+                    </p>
+                  </>
+                )}
               </div>
 
-              <div className="rounded-lg bg-slate-900 p-3 border border-slate-800">
-                <p className="text-xs text-slate-400">Vignette Crit’Air</p>
+              <div className="rounded-lg bg-slate-900 p-3 border border-slate-800 print:bg-slate-100 print:border-slate-300">
+                <p className="text-xs text-slate-400 print:text-slate-700">Vignette Crit’Air</p>
                 <p className="mt-1 font-semibold">{evaluation.critAir.vignette}</p>
-                <p className="text-xs text-slate-400 mt-0.5">
+                <p className="text-xs text-slate-400 mt-0.5 print:text-slate-700">
                   {formatCritAirSource(evaluation.critAir.source)}
                 </p>
               </div>
             </div>
 
             {evaluation.matchedEngine && (
-              <div className="rounded-lg bg-slate-900 p-3 border border-slate-800 text-xs space-y-2">
+              <div className="rounded-lg bg-slate-900 p-3 border border-slate-800 text-xs space-y-2 print:bg-slate-100 print:border-slate-300">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
-                    <p className="text-slate-400">Motorisation identifiée :</p>
-                    <p className="font-semibold text-slate-100">{evaluation.matchedEngine.label}</p>
+                    <p className="text-slate-400 print:text-slate-700">Motorisation identifiée :</p>
+                    <p className="font-semibold text-slate-100 print:text-black">
+                      {evaluation.matchedEngine.label}
+                    </p>
                   </div>
                   {hingeBadge && (
                     <span
@@ -702,22 +762,28 @@ export default function HomePage() {
                   )}
                 </div>
                 {evaluation.matchedEngine.hingeNote && (
-                  <p className="text-amber-300">{evaluation.matchedEngine.hingeNote}</p>
+                  <p className="text-amber-300 print:text-amber-900">
+                    {evaluation.matchedEngine.hingeNote}
+                  </p>
                 )}
               </div>
             )}
 
             {evaluation.mileageCheck.note && (
-              <div className="rounded-lg bg-slate-900 p-3 border border-slate-800 text-xs">
-                <p className="text-slate-400">Cohérence kilométrique :</p>
-                <p className="text-slate-200 mt-0.5">{evaluation.mileageCheck.note}</p>
+              <div className="rounded-lg bg-slate-900 p-3 border border-slate-800 text-xs print:bg-slate-100 print:border-slate-300">
+                <p className="text-slate-400 print:text-slate-700">Cohérence kilométrique :</p>
+                <p className="text-slate-200 mt-0.5 print:text-black">
+                  {evaluation.mileageCheck.note}
+                </p>
               </div>
             )}
 
             {evaluation.alerts.length > 0 && (
               <div className="space-y-1">
-                <p className="text-xs font-semibold text-amber-300">Points d’attention :</p>
-                <ul className="list-disc list-inside text-xs text-slate-200 space-y-1">
+                <p className="text-xs font-semibold text-amber-300 print:text-amber-900">
+                  Points d’attention :
+                </p>
+                <ul className="list-disc list-inside text-xs text-slate-200 space-y-1 print:text-black">
                   {evaluation.alerts.map((alert, idx) => (
                     <li key={idx}>{alert}</li>
                   ))}
@@ -726,14 +792,14 @@ export default function HomePage() {
             )}
 
             {!isUnlocked && fullReport && (
-              <div className="rounded-xl bg-slate-900 border border-emerald-700/50 p-4 space-y-4">
+              <div className="rounded-xl bg-slate-900 border border-emerald-700/50 p-4 space-y-4 print:hidden">
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <p className="text-sm font-bold text-emerald-300">
                       Pass 30 jours — Rapport complet & Négociation
                     </p>
                     <p className="text-xs text-slate-400 mt-0.5">
-                      Valable 30 jours (analyses multiples incluses). Inclut check-list, marge de négociation et message vendeur.
+                      Valable 30 jours (analyses multiples incluses). Montants détaillés, stratégie de négociation, check-list terrain et messages vendeur.
                     </p>
                   </div>
                   <div className="text-right shrink-0">
@@ -748,18 +814,22 @@ export default function HomePage() {
                   </div>
                 </div>
 
+                <p className="text-xs font-medium text-emerald-200 bg-emerald-950/30 border border-emerald-800/40 rounded-lg px-3 py-2">
+                  {roiAnchorText}
+                </p>
+
                 <div className="rounded-lg bg-slate-950/80 border border-slate-800 p-3 space-y-2 relative overflow-hidden">
                   <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-                    Aperçu de votre check-list & négociation :
+                    Aperçu du rapport complet :
                   </p>
                   <ul className="list-disc list-inside text-xs text-slate-200 space-y-1">
                     {fullReport.inspectionChecklist.slice(0, 2).map((item, idx) => (
                       <li key={idx}>{item}</li>
                     ))}
                   </ul>
-                  <div className="text-xs text-slate-400 blur-[2px] select-none pt-1">
-                    • {fullReport.negotiationAdvice.argumentSummary}
-                    <br />• Message vendeur personnalisé prêt à copier pour demander les preuves d’entretien...
+                  <div className="text-xs text-slate-400 blur-[4px] select-none pt-1">
+                    • Estimation détaillée indépendant / concession et calcul du vrai prix d’achat incluant les travaux préventifs...
+                    <br />• 3 modèles de messages vendeur (courtois, technique, négociation) et check-list interactive sur place.
                   </div>
                 </div>
 
@@ -770,10 +840,10 @@ export default function HomePage() {
                     onChange={(e) => setIncludeCerfaBump(e.target.checked)}
                     className="mt-0.5 accent-emerald-500 shrink-0"
                   />
-                  <div className="space-y-1">
+                  <div className="space-y-1 flex-1">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <p className="font-semibold text-amber-300">
-                        Option (+9,90 €) : Pack Démarches & Protection Litige
+                        Pack Achat Serein (+9,90 €) : Sécurité le jour J + Protection litige
                       </p>
                       {includeCerfaBump && (
                         <span className="text-[11px] font-semibold text-emerald-300">
@@ -782,8 +852,8 @@ export default function HomePage() {
                       )}
                     </div>
                     <ul className="list-disc list-inside text-[11px] text-slate-300 space-y-0.5">
-                      <li><strong>Avant l’achat :</strong> Guide pas-à-pas cession (Cerfa 15776*02) & ANTS.</li>
-                      <li><strong>Après l’achat :</strong> Modèle de Lettre Recommandée (LRAR) pour vice caché.</li>
+                      <li><strong>Avant & jour de l’achat :</strong> Vérification des papiers, cession (Cerfa 15776*02) & ANTS.</li>
+                      <li><strong>En cas de litige :</strong> Modèle de Lettre Recommandée (LRAR) pour vice caché.</li>
                     </ul>
                   </div>
                 </label>
@@ -798,104 +868,199 @@ export default function HomePage() {
                   <span>{fullReport.legalDisclaimers.withdrawalWaiverText}</span>
                 </label>
 
-                <button
-                  type="button"
-                  onClick={handleLocalTestUnlock}
-                  className="w-full rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold py-2.5 text-sm transition cursor-pointer"
-                >
-                  {unlockButtonLabel}
-                </button>
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    onClick={handleLocalTestUnlock}
+                    className="w-full rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold py-2.5 text-sm transition cursor-pointer"
+                  >
+                    {unlockButtonLabel}
+                  </button>
+                  <p className="text-[11px] text-center text-slate-400">
+                    Paiement sécurisé Stripe / Apple Pay • Accès instantané • Sans abonnement (aucun renouvellement automatique)
+                  </p>
+                </div>
               </div>
             )}
 
             {isUnlocked && fullReport && (
-              <div className="rounded-xl bg-slate-900 border border-emerald-600/60 p-4 space-y-4 text-sm">
-                <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 border-b border-slate-800 pb-3">
+              <div className="rounded-xl bg-slate-900 border border-emerald-600/60 p-4 space-y-4 text-sm print:bg-white print:border-slate-300 print:text-black">
+                <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 border-b border-slate-800 pb-3 print:border-slate-300">
                   <div className="min-w-0">
-                    <p className="text-[11px] uppercase tracking-wider text-emerald-400 font-semibold">
+                    <p className="text-[11px] uppercase tracking-wider text-emerald-400 font-semibold print:text-black">
                       Pass 30 jours actif — Rapport & Pack LRAR
                     </p>
-                    <p className="text-[11px] text-slate-400 mt-0.5">
+                    <p className="text-[11px] text-slate-400 mt-0.5 print:text-slate-700">
                       Valable 30 jours • analyses multiples incluses • Expire dans 30 jours
                     </p>
                     <p className="font-semibold mt-1">{fullReport.vehicleTitle}</p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setResult(null);
-                      setExtraNotes('');
-                      resetAnalysisStates();
-                    }}
-                    className="text-xs px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-300 shrink-0 cursor-pointer self-start"
-                  >
-                    + Analyser un autre véhicule
-                  </button>
+                  <div className="flex items-center gap-2 shrink-0 self-start print:hidden">
+                    <button
+                      type="button"
+                      onClick={handleExportPdf}
+                      className="text-xs px-2.5 py-1.5 rounded-lg bg-slate-950 hover:bg-slate-800 border border-slate-700 text-slate-100 cursor-pointer"
+                    >
+                      Télécharger PDF
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setResult(null);
+                        setExtraNotes('');
+                        resetAnalysisStates();
+                      }}
+                      className="text-xs px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-300 cursor-pointer"
+                    >
+                      + Analyser un autre véhicule
+                    </button>
+                  </div>
                 </div>
 
-                <p className="text-xs text-slate-300">{fullReport.executiveSummary}</p>
+                <p className="text-xs text-slate-300 print:text-black">{fullReport.executiveSummary}</p>
 
-                <div className="rounded-lg bg-slate-950 p-3 border border-slate-800 space-y-1">
-                  <p className="text-xs font-semibold text-emerald-400">Stratégie de négociation</p>
-                  <p className="text-xs text-slate-200">
+                {fullReport.listedPriceEur !== null &&
+                  fullReport.truePurchaseCostIndep !== null &&
+                  fullReport.truePurchaseCostDealer !== null && (
+                    <div className="rounded-lg bg-slate-950 p-3 border border-amber-700/40 space-y-1 print:bg-slate-100 print:border-slate-300">
+                      <p className="text-xs font-semibold text-amber-300 print:text-black">
+                        Calcul du vrai prix d’achat
+                      </p>
+                      <p className="text-xs text-slate-200 print:text-black">
+                        Prix affiché ({fullReport.listedPriceEur.toLocaleString('fr-FR')} €) + Travaux préventifs ({fullReport.negotiationAdvice.suggestedDiscountIndep.toLocaleString('fr-FR')} €) ={' '}
+                        <strong>{fullReport.truePurchaseCostIndep.toLocaleString('fr-FR')} €</strong>{' '}
+                        (jusqu’à{' '}
+                        <strong>{fullReport.truePurchaseCostDealer.toLocaleString('fr-FR')} €</strong>{' '}
+                        en concession).
+                      </p>
+                    </div>
+                  )}
+
+                <div className="rounded-lg bg-slate-950 p-3 border border-slate-800 space-y-1 print:bg-slate-100 print:border-slate-300">
+                  <p className="text-xs font-semibold text-emerald-400 print:text-black">
+                    Stratégie de négociation
+                  </p>
+                  <p className="text-xs text-slate-200 print:text-black">
                     {fullReport.negotiationAdvice.argumentSummary}
+                  </p>
+                  <p className="text-[11px] text-slate-400 print:text-slate-700">
+                    {fullReport.negotiationAdvice.repairScopeDetail}
                   </p>
                 </div>
 
                 <div className="space-y-1.5">
-                  <p className="text-xs font-semibold text-slate-200">
-                    Check-list complète avant déplacement & essai
+                  <p className="text-xs font-semibold text-slate-200 print:text-black">
+                    Check-list interactive sur le terrain (à cocher devant le véhicule)
                   </p>
-                  <ul className="list-disc list-inside text-xs text-slate-300 space-y-1">
-                    {fullReport.inspectionChecklist.map((item, idx) => (
-                      <li key={idx}>{item}</li>
-                    ))}
+                  <ul className="space-y-1.5 text-xs text-slate-300 print:text-black">
+                    {fullReport.inspectionChecklist.map((item, idx) => {
+                      const isChecked = Boolean(checkedItems[idx]);
+                      return (
+                        <li key={idx}>
+                          <label className="flex items-start gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() =>
+                                setCheckedItems((prev) => ({
+                                  ...prev,
+                                  [idx]: !prev[idx],
+                                }))
+                              }
+                              className="mt-0.5 accent-emerald-500 shrink-0"
+                            />
+                            <span className={isChecked ? 'line-through text-slate-500' : ''}>
+                              {item}
+                            </span>
+                          </label>
+                        </li>
+                      );
+                    })}
                   </ul>
                 </div>
 
                 <div className="space-y-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-xs font-semibold text-emerald-400">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-xs font-semibold text-emerald-400 print:text-black">
                       Message prêt à envoyer au vendeur
                     </p>
                     <button
                       type="button"
-                      onClick={() => handleCopyText(fullReport.sellerMessageScript, 'seller')}
-                      className="text-xs px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-100 cursor-pointer shrink-0"
+                      onClick={() =>
+                        handleCopyText(fullReport.sellerMessages[messageTone], 'seller')
+                      }
+                      className="text-xs px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-100 cursor-pointer shrink-0 print:hidden"
                     >
                       {copiedKey === 'seller' ? 'Copié !' : 'Copier'}
                     </button>
                   </div>
-                  <pre className="rounded-lg bg-slate-950 border border-slate-800 p-3 text-xs text-slate-200 whitespace-pre-wrap">
-                    {fullReport.sellerMessageScript}
+
+                  <div className="flex flex-wrap gap-1.5 print:hidden">
+                    <button
+                      type="button"
+                      onClick={() => setMessageTone('courtois')}
+                      className={`text-xs px-2.5 py-1 rounded-lg border cursor-pointer ${
+                        messageTone === 'courtois'
+                          ? 'bg-emerald-500 text-slate-950 border-emerald-400 font-semibold'
+                          : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
+                      }`}
+                    >
+                      Courtois & curieux
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setMessageTone('technique')}
+                      className={`text-xs px-2.5 py-1 rounded-lg border cursor-pointer ${
+                        messageTone === 'technique'
+                          ? 'bg-emerald-500 text-slate-950 border-emerald-400 font-semibold'
+                          : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
+                      }`}
+                    >
+                      Factuel & technique
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setMessageTone('negotiation')}
+                      className={`text-xs px-2.5 py-1 rounded-lg border cursor-pointer ${
+                        messageTone === 'negotiation'
+                          ? 'bg-emerald-500 text-slate-950 border-emerald-400 font-semibold'
+                          : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
+                      }`}
+                    >
+                      Négociation douce
+                    </button>
+                  </div>
+
+                  <pre className="rounded-lg bg-slate-950 border border-slate-800 p-3 text-xs text-slate-200 whitespace-pre-wrap print:bg-slate-100 print:text-black print:border-slate-300">
+                    {fullReport.sellerMessages[messageTone]}
                   </pre>
                 </div>
 
                 {includeCerfaBump && (
-                  <div className="rounded-xl bg-slate-950 border border-amber-600/50 p-4 space-y-3">
-                    <p className="text-xs font-bold uppercase tracking-wider text-amber-300">
-                      Pack Démarches & Lettre Recommandée (LRAR)
+                  <div className="rounded-xl bg-slate-950 border border-amber-600/50 p-4 space-y-3 print:bg-white print:border-slate-300 print:text-black">
+                    <p className="text-xs font-bold uppercase tracking-wider text-amber-300 print:text-black">
+                      Pack Achat Serein & Lettre Recommandée (LRAR)
                     </p>
 
                     <div className="space-y-1.5">
-                      <p className="text-xs font-semibold text-slate-200">
+                      <p className="text-xs font-semibold text-slate-200 print:text-black">
                         1. Démarches cession (Cerfa 15776*02) & immatriculation
                       </p>
-                      <ul className="list-disc list-inside text-xs text-slate-300 space-y-1">
+                      <ol className="list-decimal list-inside text-xs text-slate-300 space-y-1 print:text-black">
                         {fullReport.cerfaAndLitigationPack.cessionAndRegistrationSteps.map(
                           (step, idx) => (
                             <li key={idx}>{step}</li>
                           )
                         )}
-                      </ul>
+                      </ol>
                     </div>
 
-                    <div className="space-y-2 pt-2 border-t border-slate-800">
+                    <div className="space-y-2 pt-2 border-t border-slate-800 print:border-slate-300">
                       <div className="flex flex-wrap items-center justify-between gap-2">
-                        <p className="text-xs font-semibold text-amber-300">
+                        <p className="text-xs font-semibold text-amber-300 print:text-black">
                           2. Modèle de Lettre Recommandée (LRAR — Litige / Vice caché)
                         </p>
-                        <div className="flex items-center gap-2 shrink-0">
+                        <div className="flex items-center gap-2 shrink-0 print:hidden">
                           <button
                             type="button"
                             onClick={() => setExpandLetter((prev) => !prev)}
@@ -917,12 +1082,12 @@ export default function HomePage() {
                           </button>
                         </div>
                       </div>
-                      <p className="text-[11px] text-amber-200/80 bg-amber-950/30 p-2 rounded border border-amber-800/40">
+                      <p className="text-[11px] text-amber-200/80 bg-amber-950/30 p-2 rounded border border-amber-800/40 print:bg-slate-100 print:text-black print:border-slate-300">
                         ⚠️ <strong>Information documentaire & preuves :</strong> Remplacez tous les champs entre crochets <code>[...]</code> et adaptez le délai à votre situation. En cas de litige (notamment vice caché), la réunion de preuves objectives (factures, diagnostic, expertise) est déterminante. Ce modèle ne remplace pas l’avis d’un avocat ou d’une protection juridique.
                       </p>
                       <pre
                         style={{ colorScheme: 'dark' }}
-                        className={`rounded-lg bg-slate-900 border border-slate-800 p-3 text-xs text-slate-200 whitespace-pre-wrap break-words ${
+                        className={`rounded-lg bg-slate-900 border border-slate-800 p-3 text-xs text-slate-200 whitespace-pre-wrap break-words print:bg-slate-100 print:text-black print:border-slate-300 print:overflow-visible ${
                           expandLetter
                             ? 'overflow-visible'
                             : 'max-h-64 overflow-y-auto overflow-x-hidden'
@@ -938,85 +1103,87 @@ export default function HomePage() {
           </div>
         )}
 
-        <form
-          onSubmit={handleGenerateMagicLink}
-          className="rounded-xl bg-slate-950 border border-slate-800 p-4 space-y-3"
-        >
-          <div>
-            <p className="text-xs font-bold uppercase tracking-wider text-emerald-400">
-              Chasseur de CT — Revenir quand le vendeur répond
-            </p>
-            <p className="text-xs text-slate-400 mt-0.5">
-              Pas encore le rapport Histovec ou le contrôle technique ? Recevez un lien par email pour relancer l’analyse dès que le vendeur vous les envoie.
-            </p>
-            <p className="text-[11px] text-slate-500 mt-1">
-              🔒 Votre adresse e-mail et le rappel du véhicule servent uniquement à vous envoyer le lien de reprise et ne sont pas utilisés à d’autres fins.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-            <input
-              type="email"
-              value={hunterEmail}
-              onChange={(e) => setHunterEmail(e.target.value)}
-              placeholder="ton.email@exemple.fr"
-              className="rounded-lg bg-slate-900 border border-slate-800 px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-emerald-400"
-            />
-            <input
-              type="text"
-              value={hunterVehicle}
-              onChange={(e) => setHunterVehicle(e.target.value)}
-              placeholder="Véhicule visé (ex. Clio 4 0.9 TCe 2018)"
-              className="rounded-lg bg-slate-900 border border-slate-800 px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-emerald-400"
-            />
-          </div>
-
-          <button
-            type="submit"
-            disabled={loadingMagic}
-            className="w-full rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 py-2 text-xs font-semibold text-emerald-300 transition cursor-pointer"
+        {!isPassActive && (
+          <form
+            onSubmit={handleGenerateMagicLink}
+            className="rounded-xl bg-slate-950 border border-slate-800 p-4 space-y-3 print:hidden"
           >
-            {loadingMagic ? 'Création du lien...' : 'Recevoir mon Magic Link de reprise'}
-          </button>
-
-          {magicUrl && (
-            <div className="rounded-lg bg-slate-900 border border-emerald-700/50 p-3 space-y-2 text-xs">
-              {magicEmailSent ? (
-                <p className="text-emerald-300 font-semibold">
-                  Email envoyé à {hunterEmail} avec ton Magic Link.
-                </p>
-              ) : (
-                <p className="text-emerald-300 font-semibold">Magic Link prêt :</p>
-              )}
-              {magicEmailError && (
-                <p className="text-amber-300">
-                  Envoi email non effectué ({magicEmailError}). Tu peux utiliser le lien direct ci-dessous :
-                </p>
-              )}
-              <p className="font-mono break-all text-slate-200">{magicUrl}</p>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleCopyText(magicUrl, 'magic')}
-                  className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-100 cursor-pointer"
-                >
-                  {copiedKey === 'magic' ? 'Lien copié !' : 'Copier le lien'}
-                </button>
-                <a
-                  href={magicUrl}
-                  className="px-2.5 py-1 rounded bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold"
-                >
-                  Tester l’ouverture du lien
-                </a>
-              </div>
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wider text-emerald-400">
+                Chasseur de CT — Revenir quand le vendeur répond
+              </p>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Pas encore le rapport Histovec ou le contrôle technique ? Recevez un lien par email pour relancer l’analyse dès que le vendeur vous les envoie.
+              </p>
+              <p className="text-[11px] text-slate-500 mt-1">
+                🔒 Votre adresse e-mail et le rappel du véhicule servent uniquement à vous envoyer le lien de reprise et ne sont pas utilisés à d’autres fins.
+              </p>
             </div>
-          )}
-        </form>
 
-        {extraction && (
-          <details className="rounded-xl bg-slate-950 border border-slate-800 p-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <input
+                type="email"
+                value={hunterEmail}
+                onChange={(e) => setHunterEmail(e.target.value)}
+                placeholder="ton.email@exemple.fr"
+                className="rounded-lg bg-slate-900 border border-slate-800 px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-emerald-400"
+              />
+              <input
+                type="text"
+                value={hunterVehicle}
+                onChange={(e) => setHunterVehicle(e.target.value)}
+                placeholder="Véhicule visé (ex. Clio 4 0.9 TCe 2018)"
+                className="rounded-lg bg-slate-900 border border-slate-800 px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-emerald-400"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={loadingMagic}
+              className="w-full rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 py-2 text-xs font-semibold text-emerald-300 transition cursor-pointer"
+            >
+              {loadingMagic ? 'Création du lien...' : 'Recevoir mon Magic Link de reprise'}
+            </button>
+
+            {magicUrl && (
+              <div className="rounded-lg bg-slate-900 border border-emerald-700/50 p-3 space-y-2 text-xs">
+                {magicEmailSent ? (
+                  <p className="text-emerald-300 font-semibold">
+                    Email envoyé à {hunterEmail} avec ton Magic Link.
+                  </p>
+                ) : (
+                  <p className="text-emerald-300 font-semibold">Magic Link prêt :</p>
+                )}
+                {magicEmailError && (
+                  <p className="text-amber-300">
+                    Envoi email non effectué ({magicEmailError}). Tu peux utiliser le lien direct ci-dessous :
+                  </p>
+                )}
+                <p className="font-mono break-all text-slate-200">{magicUrl}</p>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleCopyText(magicUrl, 'magic')}
+                    className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-100 cursor-pointer"
+                  >
+                    {copiedKey === 'magic' ? 'Lien copié !' : 'Copier le lien'}
+                  </button>
+                  <a
+                    href={magicUrl}
+                    className="px-2.5 py-1 rounded bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold"
+                  >
+                    Tester l’ouverture du lien
+                  </a>
+                </div>
+              </div>
+            )}
+          </form>
+        )}
+
+        {extraction && showDebugJson && (
+          <details className="rounded-xl bg-slate-950 border border-slate-800 p-3 print:hidden">
             <summary className="text-xs font-semibold text-slate-400 cursor-pointer">
-              Voir les données techniques extraites (JSON)
+              Voir les données techniques extraites (JSON — mode debug)
             </summary>
             <pre
               style={{ colorScheme: 'dark' }}
@@ -1027,7 +1194,7 @@ export default function HomePage() {
           </details>
         )}
 
-        <footer className="pt-2 border-t border-slate-800 text-[11px] text-slate-400">
+        <footer className="pt-2 border-t border-slate-800 text-[11px] text-slate-400 print:text-black print:border-slate-300">
           {fullReport?.legalDisclaimers.notAnExpertNotice ??
             'Outil d’aide à la décision basé sur l’analyse automatisée de données et documents fournis. Ne constitue pas une expertise automobile au sens de l’article L. 326-1 du Code de la route.'}
         </footer>
