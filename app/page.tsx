@@ -718,7 +718,7 @@ export default function HomePage() {
                     </span>
                     {includeCerfaBump && (
                       <span className="text-[11px] text-emerald-300 block">
-                        19,90 € + 9,90 € option
+                        19,90 € + 9,90 € = 29,80 €
                       </span>
                     )}
                   </div>
@@ -785,7 +785,7 @@ export default function HomePage() {
                       Pass 30 jours actif — Rapport & Pack LRAR
                     </p>
                     <p className="text-[11px] text-slate-400 mt-0.5">
-                      Valable 30 jours • analyses multiples incluses
+                      Valable 30 jours • analyses multiples incluses • Expire dans 30 jours
                     </p>
                     <p className="font-semibold mt-1">{fullReport.vehicleTitle}</p>
                   </div>

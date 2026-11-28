@@ -147,7 +147,6 @@ Veuillez agréer, Madame, Monsieur, l’expression de mes salutations distingué
 [Téléphone / Email]
 [Signature]
 
----
 Note informative : Ce modèle est fourni à titre purement documentaire et ne constitue pas un conseil juridique personnalisé. En matière de vice caché, la charge de la preuve (constat, diagnostic ou expertise contradictoire) est déterminante ; rapprochez-vous de votre protection juridique ou d’un avocat avant envoi.`;
 
   return {
