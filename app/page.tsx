@@ -1,6 +1,7 @@
 ﻿'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
+import { jsPDF } from 'jspdf';
 import { processUploadedFile, ProcessedUpload } from '@/lib/fileProcessor';
 import type { VehicleExtraction } from '@/lib/geminiExtractor';
 import type { EngineEvaluationResult, HingeStatus } from '@/lib/engineRules';
@@ -94,6 +95,16 @@ function formatFieldLabel(field: string): string {
   if (field === 'kilometrage') return 'kilométrage';
   if (field === 'cnit') return 'code CNIT';
   return field;
+}
+
+function slugifyFileName(value: string): string {
+  const clean = value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return clean || 'vehicule';
 }
 
 export default function HomePage() {
@@ -487,7 +498,7 @@ export default function HomePage() {
           text: summaryShare,
           url: window.location.href,
         });
-        setShareFeedback('Résumé partagé.');
+        setShareFeedback('Partagé ✓');
         setTimeout(() => setShareFeedback(null), 2000);
         return;
       } catch {
@@ -496,7 +507,7 @@ export default function HomePage() {
     }
 
     await navigator.clipboard.writeText(summaryShare);
-    setShareFeedback('Résumé copié pour partage.');
+    setShareFeedback('Copié ✓');
     setTimeout(() => setShareFeedback(null), 2000);
   }
 
@@ -506,6 +517,126 @@ export default function HomePage() {
     setTimeout(() => {
       window.print();
     }, 100);
+  }
+
+  function handleDownloadPdf() {
+    if (!fullReport || !evaluation) return;
+
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const margin = 15;
+    const maxLineWidth = pageWidth - margin * 2;
+    let y = 18;
+
+    const addSectionTitle = (title: string) => {
+      if (y > pageHeight - 25) {
+        doc.addPage();
+        y = 18;
+      }
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.setTextColor(15, 23, 42);
+      doc.text(title, margin, y);
+      y += 5.5;
+    };
+
+    const addParagraph = (text: string, fontSize = 9.5, isBold = false) => {
+      doc.setFont('helvetica', isBold ? 'bold' : 'normal');
+      doc.setFontSize(fontSize);
+      doc.setTextColor(30, 41, 59);
+      const lines = doc.splitTextToSize(text, maxLineWidth) as string[];
+      for (const line of lines) {
+        if (y > pageHeight - 16) {
+          doc.addPage();
+          y = 18;
+        }
+        doc.text(line, margin, y);
+        y += fontSize * 0.45;
+      }
+      y += 2.5;
+    };
+
+    // En-tête blanc sobre
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(15);
+    doc.setTextColor(6, 95, 70);
+    doc.text('Scanner Auto — Dossier d’aide à l’achat', margin, y);
+    y += 7;
+
+    addParagraph(fullReport.vehicleTitle, 11, true);
+    addParagraph(
+      `Verdict : ${formatVerdictLabel(evaluation.verdict)} | Score de risque : ${
+        evaluation.incompleteData ? 'À compléter' : `${evaluation.scoreRisque} / 100`
+      } | Vignette : ${evaluation.critAir.vignette}`,
+      9.5,
+      true
+    );
+
+    addSectionTitle('1. Synthèse & Budget prévisionnel');
+    addParagraph(fullReport.executiveSummary);
+    addParagraph(
+      `Travaux préventifs indicatifs : ${evaluation.estimatedRepairCost.independant.toLocaleString(
+        'fr-FR'
+      )} € (garagiste indépendant) à ${evaluation.estimatedRepairCost.concession.toLocaleString(
+        'fr-FR'
+      )} € (concession), hors casse moteur ou turbo.`
+    );
+
+    if (
+      fullReport.listedPriceEur !== null &&
+      fullReport.truePurchaseCostIndep !== null &&
+      fullReport.truePurchaseCostDealer !== null
+    ) {
+      addParagraph(
+        `Coût réel estimé : Prix affiché (${fullReport.listedPriceEur.toLocaleString(
+          'fr-FR'
+        )} €) + Travaux préventifs (${fullReport.negotiationAdvice.suggestedDiscountIndep.toLocaleString(
+          'fr-FR'
+        )} €) = ${fullReport.truePurchaseCostIndep.toLocaleString(
+          'fr-FR'
+        )} € (jusqu’à ${fullReport.truePurchaseCostDealer.toLocaleString('fr-FR')} € en concession).`,
+        9.5,
+        true
+      );
+    }
+
+    addSectionTitle('2. Stratégie de négociation');
+    addParagraph(fullReport.negotiationAdvice.argumentSummary);
+
+    if (evaluation.alerts.length > 0) {
+      addSectionTitle('3. Points d’attention détectés');
+      for (const alert of evaluation.alerts) {
+        addParagraph(`• ${alert}`);
+      }
+    }
+
+    addSectionTitle('4. Check-list terrain (à cocher devant le véhicule)');
+    for (const item of fullReport.inspectionChecklist) {
+      addParagraph(`[  ] ${item}`);
+    }
+
+    addSectionTitle('5. Message vendeur sélectionné');
+    addParagraph(fullReport.sellerMessages[messageTone]);
+
+    if (includeCerfaBump) {
+      addSectionTitle('6. Pack Achat Serein — Démarches & Modèle LRAR');
+      for (let i = 0; i < fullReport.cerfaAndLitigationPack.cessionAndRegistrationSteps.length; i++) {
+        addParagraph(
+          `${i + 1}. ${fullReport.cerfaAndLitigationPack.cessionAndRegistrationSteps[i]}`
+        );
+      }
+      y += 2;
+      addParagraph(fullReport.cerfaAndLitigationPack.registeredMailTemplate, 8.8, false);
+    }
+
+    y += 2;
+    addParagraph(fullReport.legalDisclaimers.notAnExpertNotice, 8, false);
+
+    const modelSlug = slugifyFileName(
+      `${extraction?.marque ?? ''} ${extraction?.modele ?? fullReport.vehicleTitle}`
+    );
+    doc.save(`rapport-${modelSlug}.pdf`);
   }
 
   const verdictBadgeClass =
@@ -543,9 +674,9 @@ export default function HomePage() {
     : isLowRiskHealthy
       ? `Véhicule globalement fiable, mais sécurisez les 5 points qui piègent 80 % des acheteurs (kilométrage réel, historique, papiers) pour ${totalPrice} €.`
       : fullReport.negotiationAdvice.suggestedDiscountDealer > 0
-        ? `Investissez ${totalPrice} € pour sécuriser votre achat et viser jusqu’à ${fullReport.negotiationAdvice.suggestedDiscountDealer.toLocaleString(
+        ? `Investissez ${totalPrice} € pour sécuriser votre achat et économiser jusqu’à ${fullReport.negotiationAdvice.suggestedDiscountDealer.toLocaleString(
             'fr-FR'
-          )} € d’argumentaire de négociation.`
+          )} € en négociation.`
         : `Investissez ${totalPrice} € pour obtenir la check-list terrain, la stratégie de négociation et les messages vendeur prêts à l’envoi.`;
 
   const isPassActive = isUnlocked || restoredAccess;
@@ -664,7 +795,7 @@ export default function HomePage() {
           <div className="rounded-xl bg-slate-950 border border-slate-800 p-4 space-y-4 print:bg-white print:border-slate-300 print:text-black">
             {isDemoMode && (
               <div className="rounded-lg bg-indigo-950/50 border border-indigo-700/60 px-3 py-2 text-xs text-indigo-200 flex items-center justify-between print:hidden">
-                <span>💡 Ceci est une simulation d’exemple (Peugeot 208).</span>
+                <span>💡 Ceci est une simulation d’exemple (Peugeot 208 — 8 900 €).</span>
                 <button
                   type="button"
                   onClick={() => {
@@ -922,7 +1053,7 @@ export default function HomePage() {
                     ))}
                   </ul>
                   <div className="text-xs text-slate-400 blur-[5px] select-none pt-1">
-                    • Estimation détaillée indépendant / concession et calcul du vrai prix d’achat incluant les travaux préventifs...
+                    • Estimation détaillée indépendant / concession et calcul du coût réel estimé incluant les travaux préventifs...
                     <br />• 3 modèles de messages vendeur (courtois, technique, négociation) et check-list interactive sur place.
                   </div>
                 </div>
@@ -979,35 +1110,39 @@ export default function HomePage() {
 
             {isUnlocked && fullReport && (
               <div className="rounded-xl bg-slate-900 border border-emerald-600/60 p-4 space-y-4 text-sm print:bg-white print:border-slate-300 print:text-black">
-                <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 border-b border-slate-800 pb-3 print:border-slate-300">
-                  <div className="min-w-0">
+                {/* EN-TÊTE EMPILÉ EN PLEINE LARGEUR */}
+                <div className="flex flex-col gap-4 border-b border-slate-800 pb-4 print:border-slate-300">
+                  <div className="w-full">
                     <p className="text-[11px] uppercase tracking-wider text-emerald-400 font-semibold print:text-black">
                       Pass 30 jours actif — Rapport & Pack LRAR
                     </p>
                     <p className="text-[11px] text-slate-400 mt-0.5 print:text-slate-700">
                       Valable 30 jours • analyses multiples incluses • Expire dans 30 jours
                     </p>
-                    <p className="font-semibold mt-1">{fullReport.vehicleTitle}</p>
+                    <p className="text-base font-semibold mt-1.5 text-slate-100 print:text-black">
+                      {fullReport.vehicleTitle}
+                    </p>
                   </div>
-                  <div className="flex flex-wrap items-center gap-2 shrink-0 self-start print:hidden">
+
+                  <div className="flex flex-wrap items-center gap-2 print:hidden">
                     <button
                       type="button"
                       onClick={handleShareReport}
-                      className="text-xs px-2.5 py-1.5 rounded-lg bg-slate-950 hover:bg-slate-800 border border-slate-700 text-slate-100 cursor-pointer"
+                      className="text-xs px-3 py-1.5 rounded-lg bg-slate-950 hover:bg-slate-800 border border-slate-700 text-slate-100 cursor-pointer"
                     >
-                      {shareFeedback ?? 'Envoyer à un proche'}
+                      {shareFeedback ?? 'Partager'}
                     </button>
                     <button
                       type="button"
                       onClick={handlePrintReport}
-                      className="text-xs px-2.5 py-1.5 rounded-lg bg-slate-950 hover:bg-slate-800 border border-slate-700 text-slate-100 cursor-pointer"
+                      className="text-xs px-3 py-1.5 rounded-lg bg-slate-950 hover:bg-slate-800 border border-slate-700 text-slate-100 cursor-pointer"
                     >
                       Imprimer
                     </button>
                     <button
                       type="button"
-                      onClick={handlePrintReport}
-                      className="text-xs px-2.5 py-1.5 rounded-lg bg-slate-950 hover:bg-slate-800 border border-slate-700 text-emerald-300 cursor-pointer"
+                      onClick={handleDownloadPdf}
+                      className="text-xs px-3 py-1.5 rounded-lg bg-slate-950 hover:bg-slate-800 border border-emerald-700/60 text-emerald-300 font-medium cursor-pointer"
                     >
                       Télécharger PDF
                     </button>
@@ -1018,7 +1153,7 @@ export default function HomePage() {
                         setExtraNotes('');
                         resetAnalysisStates();
                       }}
-                      className="text-xs px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-300 cursor-pointer"
+                      className="text-xs px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-300 cursor-pointer"
                     >
                       + Analyser un autre véhicule
                     </button>
@@ -1032,7 +1167,7 @@ export default function HomePage() {
                   fullReport.truePurchaseCostDealer !== null && (
                     <div className="rounded-lg bg-slate-950 p-3 border border-amber-700/40 space-y-1 print:bg-slate-100 print:border-slate-300">
                       <p className="text-xs font-semibold text-amber-300 print:text-black">
-                        Calcul du vrai prix d’achat
+                        Coût réel estimé
                       </p>
                       <p className="text-xs text-slate-200 print:text-black">
                         Prix affiché ({fullReport.listedPriceEur.toLocaleString('fr-FR')} €) + Travaux préventifs ({fullReport.negotiationAdvice.suggestedDiscountIndep.toLocaleString('fr-FR')} €) ={' '}
@@ -1206,7 +1341,8 @@ export default function HomePage() {
           </div>
         )}
 
-        {!isPassActive && (
+        {/* CHASSEUR DE CT : AFFICHÉ UNIQUEMENT APRÈS UNE ANALYSE ET TANT QUE LE PASS N'EST PAS ACTIF */}
+        {evaluation && !isPassActive && (
           <form
             onSubmit={handleGenerateMagicLink}
             className="rounded-xl bg-slate-950 border border-slate-800 p-4 space-y-3 print:hidden"
@@ -1303,7 +1439,6 @@ export default function HomePage() {
         </footer>
       </div>
 
-      {/* STICKY CTA MOBILE QUAND UN RÉSULTAT EST AFFICHÉ ET NON DÉBLOQUÉ */}
       {evaluation && !isUnlocked && fullReport && (
         <div className="sm:hidden fixed bottom-0 inset-x-0 z-30 bg-slate-950/95 border-t border-slate-800 px-4 py-2.5 flex items-center justify-between gap-3 print:hidden">
           <div className="min-w-0">
