@@ -44,11 +44,13 @@ export function buildFullReport(
   const vehicleTitle = `${marque} ${modele} — ${motor} (${mec}, ${kmText})`.trim();
 
   const executiveSummary =
-    evaluation.verdict === 'RISQUE_ELEVE'
-      ? `Dossier à fort niveau de vigilance (score ${evaluation.scoreRisque}/100). Des éléments techniques ou documentaires nécessitent une vérification stricte des preuves d’entretien et une marge de négociation avant tout engagement.`
-      : evaluation.verdict === 'VIGILANCE'
-        ? `Dossier nécessitant de la vigilance (score ${evaluation.scoreRisque}/100). Le véhicule présente des points à contrôler ou à chiffrer avant achat, particulièrement sur la remise à niveau estimée.`
-        : `Dossier globalement favorable (score ${evaluation.scoreRisque}/100) sur les éléments analysés, sous réserve de vérifier les documents officiels et l’historique d’entretien.`;
+    evaluation.verdict === 'DONNEES_INCOMPLETES'
+      ? `Données trop partielles pour poser un diagnostic fiable. Ajoutez la motorisation, la date de mise en circulation, le kilométrage ou un document (carte grise, contrôle technique, Histovec) pour affiner l’analyse.`
+      : evaluation.verdict === 'RISQUE_ELEVE'
+        ? `Dossier à fort niveau de vigilance (score ${evaluation.scoreRisque}/100). Des éléments techniques ou documentaires nécessitent une vérification stricte des preuves d’entretien et une marge de négociation avant tout engagement.`
+        : evaluation.verdict === 'VIGILANCE'
+          ? `Dossier nécessitant de la vigilance (score ${evaluation.scoreRisque}/100). Le véhicule présente des points à contrôler ou à chiffrer avant achat, particulièrement sur la remise à niveau estimée.`
+          : `Dossier globalement favorable (score ${evaluation.scoreRisque}/100) sur les éléments analysés, sous réserve de vérifier les documents officiels et l’historique d’entretien.`;
 
   const suggestedDiscountIndep = evaluation.estimatedRepairCost.independant;
   const suggestedDiscountDealer = evaluation.estimatedRepairCost.concession;
@@ -146,6 +148,7 @@ Veuillez agréer, Madame, Monsieur, l’expression de mes salutations distingué
 [Adresse postale]
 [Téléphone / Email]
 [Signature]
+
 
 Note informative : Ce modèle est fourni à titre purement documentaire et ne constitue pas un conseil juridique personnalisé. En matière de vice caché, la charge de la preuve (constat, diagnostic ou expertise contradictoire) est déterminante ; rapprochez-vous de votre protection juridique ou d’un avocat avant envoi.`;
 

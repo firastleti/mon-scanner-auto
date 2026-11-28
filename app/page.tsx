@@ -78,9 +78,18 @@ function formatCritAirSource(rawSource: string): string {
 }
 
 function formatVerdictLabel(verdict: EngineEvaluationResult['verdict']): string {
+  if (verdict === 'DONNEES_INCOMPLETES') return 'Données incomplètes';
   if (verdict === 'RISQUE_ELEVE') return 'Risque élevé';
   if (verdict === 'VIGILANCE') return 'Vigilance';
   return 'Favorable';
+}
+
+function formatFieldLabel(field: string): string {
+  if (field === 'motorisation') return 'motorisation';
+  if (field === 'date_mec') return 'date de mise en circulation';
+  if (field === 'kilometrage') return 'kilométrage';
+  if (field === 'cnit') return 'code CNIT';
+  return field;
 }
 
 export default function HomePage() {
@@ -207,6 +216,9 @@ export default function HomePage() {
     if (!evaluation) return null;
     if (isDemoMode) {
       return 'Simulation d’exemple : basée sur un scénario de démonstration. Importez un document ou des notes réelles pour un cas concret.';
+    }
+    if (evaluation.incompleteData) {
+      return 'Données trop partielles pour conclure — renseignez la motorisation, la date de mise en circulation et le kilométrage ou importez un document.';
     }
     if (!result) {
       return 'Fiabilité limitée — basée sur le texte/notes seuls : ajoutez le rapport Histovec, le contrôle technique ou la carte grise pour affiner l’analyse.';
@@ -419,7 +431,9 @@ export default function HomePage() {
       ? 'bg-red-950 text-red-300 border-red-700'
       : evaluation?.verdict === 'VIGILANCE'
         ? 'bg-amber-950 text-amber-300 border-amber-700'
-        : 'bg-emerald-950 text-emerald-300 border-emerald-700';
+        : evaluation?.verdict === 'DONNEES_INCOMPLETES'
+          ? 'bg-slate-800 text-slate-300 border-slate-600'
+          : 'bg-emerald-950 text-emerald-300 border-emerald-700';
 
   const hingeBadge = evaluation?.matchedEngine
     ? getHingeBadge(evaluation.matchedEngine.hingeStatus)
@@ -546,7 +560,15 @@ export default function HomePage() {
                 {formatVerdictLabel(evaluation.verdict)}
               </span>
               <span className="text-sm font-mono text-slate-300 whitespace-nowrap">
-                Score de risque : <strong>{evaluation.scoreRisque} / 100</strong>
+                {evaluation.incompleteData ? (
+                  <>
+                    Score de risque : <strong>À compléter</strong>
+                  </>
+                ) : (
+                  <>
+                    Score de risque : <strong>{evaluation.scoreRisque} / 100</strong>
+                  </>
+                )}
               </span>
             </div>
 
@@ -585,9 +607,11 @@ export default function HomePage() {
                   )}
                   {evaluation.postOcrValidation.lowConfidenceFields.length > 0 && (
                     <p className="text-xs text-amber-200 mt-1">
-                      Champs à lisibilité faible :{' '}
+                      Champs à vérifier :{' '}
                       <strong>
-                        {evaluation.postOcrValidation.lowConfidenceFields.join(', ')}
+                        {evaluation.postOcrValidation.lowConfidenceFields
+                          .map(formatFieldLabel)
+                          .join(', ')}
                       </strong>
                       . Confirme ou corrige les valeurs ci-dessous :
                     </p>
@@ -615,7 +639,7 @@ export default function HomePage() {
                     max={12}
                     value={manualMonth}
                     onChange={(e) => setManualMonth(e.target.value)}
-                    placeholder="Mois MEC (1-12)"
+                    placeholder="Mois de mise en circulation (1-12)"
                     className="rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-xs text-slate-100"
                   />
                   <input
@@ -624,7 +648,7 @@ export default function HomePage() {
                     max={2030}
                     value={manualYear}
                     onChange={(e) => setManualYear(e.target.value)}
-                    placeholder="Année MEC (ex. 2019)"
+                    placeholder="Année de mise en circulation (ex. 2019)"
                     className="rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-xs text-slate-100"
                   />
                 </div>

@@ -19,6 +19,12 @@ export type HingeStatus =
   | 'hinge_to_verify'
   | 'fixed_after_fix';
 
+export type EvaluationVerdict =
+  | 'DONNEES_INCOMPLETES'
+  | 'FAVORABLE'
+  | 'VIGILANCE'
+  | 'RISQUE_ELEVE';
+
 export interface MileageConsistencyResult {
   status: 'coherent' | 'suspicious_low' | 'high_mileage' | 'unknown';
   expectedAnnualKm: number | null;
@@ -61,7 +67,8 @@ export interface EngineEvaluationResult {
   mileageCheck: MileageConsistencyResult;
   postOcrValidation: PostOcrValidationResult;
   scoreRisque: number;
-  verdict: 'FAVORABLE' | 'VIGILANCE' | 'RISQUE_ELEVE';
+  incompleteData: boolean;
+  verdict: EvaluationVerdict;
   estimatedRepairCost: {
     independant: number;
     concession: number;
@@ -93,7 +100,7 @@ export const ENGINE_RULES: EngineRule[] = [
     fixMonth: 3,
     riskTitle: 'Dégradation courroie de distribution dans l’huile & encrassement crépine',
     riskSummary:
-      'La courroie immergée peut se dégrader prématurément, boucher la crépine de pompe à huile et provoquer une baisse de pression d’huile, une surconsommation d’huile ou une casse moteur.',
+      'La courroie immergée peut se dégrader prématurément, boucher la crépine de pompe à huile et provoquer une casse moteur ou une baisse de pression d’huile.',
     repairScopeNote:
       'Estimation indicative pour contrôle/remplacement du kit distribution, nettoyage de crépine et vidange (hors casse moteur ou turbo).',
     costIndep: 950,
@@ -524,6 +531,15 @@ export function evaluateVehicle(extraction: VehicleExtraction): EngineEvaluation
   const alerts: string[] = [];
   const sellerQuestions: string[] = [];
 
+  const hasMotor = Boolean(extraction.motorisation_texte && extraction.motorisation_texte.trim());
+  const hasYear = typeof extraction.annee_mec === 'number' && extraction.annee_mec > 0;
+  const hasKm = typeof extraction.kilometrage_km === 'number' && extraction.kilometrage_km > 0;
+  const hasReadingsOrDefects =
+    (Array.isArray(extraction.releves_kilometrage) && extraction.releves_kilometrage.length > 0) ||
+    defautsUtac.length > 0;
+
+  const isVeryIncomplete = !hasMotor && !hasYear && !hasKm && !hasReadingsOrDefects;
+
   let rawScore = 6;
   let matchedEngineResult: EngineEvaluationResult['matchedEngine'] = null;
   let intrinsicRisk: {
@@ -532,7 +548,6 @@ export function evaluateVehicle(extraction: VehicleExtraction): EngineEvaluation
     costDealer: number;
   } | null = null;
 
-  // 1. Garde-fou Post-OCR (monotonie kilométrique + confiance)
   const postOcrValidation = validatePostOcr(extraction);
   if (postOcrValidation.anomalieCompteurOuOcr && postOcrValidation.anomalieDetail) {
     rawScore += 32;
@@ -542,7 +557,6 @@ export function evaluateVehicle(extraction: VehicleExtraction): EngineEvaluation
     );
   }
 
-  // 2. Cohérence kilométrique par rapport à l'âge
   const mileageCheck = evaluateMileageConsistency(extraction);
   if (mileageCheck.status === 'suspicious_low') {
     rawScore += 16;
@@ -555,7 +569,6 @@ export function evaluateVehicle(extraction: VehicleExtraction): EngineEvaluation
     if (mileageCheck.note) alerts.push(mileageCheck.note);
   }
 
-  // 2 bis. Croisement multi-documents : dérive entre le dernier relevé daté (CT/Histovec) et le km actuel
   const readings = Array.isArray(extraction.releves_kilometrage)
     ? extraction.releves_kilometrage
     : [];
@@ -586,7 +599,6 @@ export function evaluateVehicle(extraction: VehicleExtraction): EngineEvaluation
     }
   }
 
-  // 3. Matrice Moteurs avec pondération dynamique selon l'absence de facture, l'âge et le kilométrage
   for (const rule of ENGINE_RULES) {
     if (rule.excludeHybrid && hybridDetected) {
       continue;
@@ -669,7 +681,6 @@ export function evaluateVehicle(extraction: VehicleExtraction): EngineEvaluation
     }
   }
 
-  // 4. Défauts UTAC avec déduplication de main-d'œuvre + signal sur défauts mineurs multiples
   let totalIndep = intrinsicRisk ? intrinsicRisk.costIndep : 0;
   let totalDealer = intrinsicRisk ? intrinsicRisk.costDealer : 0;
   let minorDefectsCount = 0;
@@ -704,7 +715,6 @@ export function evaluateVehicle(extraction: VehicleExtraction): EngineEvaluation
     );
   }
 
-  // 5. Mentions d'entretien additionnelles
   for (const mention of entretienMentions) {
     if (mention.statut === 'defaut_signale') {
       rawScore += 18;
@@ -718,11 +728,31 @@ export function evaluateVehicle(extraction: VehicleExtraction): EngineEvaluation
     }
   }
 
-  // 6. Courbe asymptotique bornée entre 0 et 100
+  if (isVeryIncomplete) {
+    alerts.unshift(
+      'Informations insuffisantes pour conclure : précisez au moins la motorisation, la date de mise en circulation et le kilométrage (ou importez un document).'
+    );
+    return {
+      matchedEngine: matchedEngineResult,
+      mileageCheck,
+      postOcrValidation,
+      scoreRisque: 0,
+      incompleteData: true,
+      verdict: 'DONNEES_INCOMPLETES',
+      estimatedRepairCost: {
+        independant: 0,
+        concession: 0,
+      },
+      critAir: computeCritAir(extraction),
+      alerts,
+      sellerQuestions,
+    };
+  }
+
   const clampedRaw = Math.max(0, rawScore);
   const scoreRisque = Math.min(100, Math.round(100 * (1 - Math.exp(-clampedRaw / 55))));
 
-  let verdict: EngineEvaluationResult['verdict'] = 'FAVORABLE';
+  let verdict: EvaluationVerdict = 'FAVORABLE';
   if (
     scoreRisque >= 60 ||
     postOcrValidation.anomalieCompteurOuOcr ||
@@ -738,6 +768,7 @@ export function evaluateVehicle(extraction: VehicleExtraction): EngineEvaluation
     mileageCheck,
     postOcrValidation,
     scoreRisque,
+    incompleteData: false,
     verdict,
     estimatedRepairCost: {
       independant: Math.round(totalIndep / 10) * 10,
