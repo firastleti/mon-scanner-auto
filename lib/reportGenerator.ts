@@ -136,9 +136,15 @@ export function buildFullReport(
 
   const docsPhrase = docRequests.join(', ').replace(/, ([^,]*)$/, ' et $1');
 
+  const primaryRiskFocus = evaluation.matchedEngine
+    ? ` — notamment concernant ${evaluation.matchedEngine.label.toLowerCase()}`
+    : evaluation.alerts.length > 0
+      ? ` — notamment sur les points d’attention relevés`
+      : '';
+
   const courtois = `Bonjour, je suis intéressé par votre ${shortVehicleLabel}. Avant de me déplacer pour voir le véhicule, pourriez-vous me transmettre ${docsPhrase} ? Merci beaucoup pour votre retour.`;
 
-  const technique = `Bonjour, au sujet de votre ${shortVehicleLabel}, pouvez-vous me confirmer l’historique d’entretien complet (dates, kilométrages et factures détaillées), me partager ${
+  const technique = `Bonjour, au sujet de votre ${shortVehicleLabel}${primaryRiskFocus}, pouvez-vous me confirmer l’historique d’entretien complet (dates, kilométrages et factures détaillées), me partager ${
     !hasMileageReadings ? 'le rapport Histovec ainsi que ' : ''
   }le dernier contrôle technique, et me préciser si des interventions ou défauts sont à prévoir à court terme ?`;
 
@@ -148,10 +154,13 @@ export function buildFullReport(
           'fr-FR'
         )} € à ${suggestedDiscountDealer.toLocaleString(
           'fr-FR'
-        )} € de frais d’entretien/remise à niveau à prévoir. Seriez-vous ouvert à une proposition autour de ${
+        )} € de frais d’entretien/remise à niveau à prévoir. Seriez-vous ouvert à ${
           listedPriceEur !== null
-            ? `${Math.max(500, listedPriceEur - suggestedDiscountIndep).toLocaleString('fr-FR')} €`
-            : 'un prix ajusté'
+            ? `une proposition autour de ${Math.max(
+                500,
+                listedPriceEur - suggestedDiscountIndep
+              ).toLocaleString('fr-FR')} €`
+            : 'une proposition ajustée'
         } si la transaction se conclut rapidement ?`
       : `Bonjour, après revue des éléments disponibles pour votre ${shortVehicleLabel}, je souhaite m’assurer de l’absence de frais proches sur l’entretien courant. Seriez-vous disponible pour un échange rapide afin d’affiner ensemble une offre ferme ?`;
 

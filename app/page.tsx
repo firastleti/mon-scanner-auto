@@ -15,8 +15,8 @@ const DEMO_SCENARIO: {
   notes: string;
   mockExtraction: VehicleExtraction;
 } = {
-  label: 'Exemple : Peugeot 208 1.2 PureTech (06/2019 — 88 000 km)',
-  notes: 'Peugeot 208 1.2 PureTech 06/2019, 88 000 km, courroie à prévoir, CT vierge, 9 500 €.',
+  label: 'Exemple : Peugeot 208 1.2 PureTech (06/2019 — 88 000 km — 8 900 €)',
+  notes: 'Peugeot 208 1.2 PureTech 06/2019, 88 000 km, 8 900 €, courroie à prévoir.',
   mockExtraction: {
     marque: 'Peugeot',
     modele: '208',
@@ -107,6 +107,7 @@ export default function HomePage() {
   const [isDemoMode, setIsDemoMode] = useState(false);
   const [isLocalHost, setIsLocalHost] = useState(false);
   const [showDebugJson, setShowDebugJson] = useState(false);
+  const [showLbcGuide, setShowLbcGuide] = useState(false);
 
   const [manualMotor, setManualMotor] = useState('');
   const [manualYear, setManualYear] = useState('');
@@ -121,6 +122,7 @@ export default function HomePage() {
   const [messageTone, setMessageTone] = useState<SellerMessageTone>('courtois');
   const [checkedItems, setCheckedItems] = useState<Record<number, boolean>>({});
   const [copiedKey, setCopiedKey] = useState<'seller' | 'rar' | 'magic' | null>(null);
+  const [shareFeedback, setShareFeedback] = useState<string | null>(null);
 
   const [hunterEmail, setHunterEmail] = useState('');
   const [hunterVehicle, setHunterVehicle] = useState('');
@@ -183,6 +185,40 @@ export default function HomePage() {
     if (!extraction || !evaluation) return null;
     return buildFullReport(extraction, evaluation, extraNotes);
   }, [extraction, evaluation, extraNotes]);
+
+  const checklistStorageKey = useMemo(() => {
+    if (!fullReport) return null;
+    return `scanner_auto_checklist_${fullReport.vehicleTitle}`;
+  }, [fullReport]);
+
+  useEffect(() => {
+    if (!checklistStorageKey || typeof window === 'undefined') return;
+    try {
+      const raw = window.localStorage.getItem(checklistStorageKey);
+      if (raw) {
+        const parsed = JSON.parse(raw) as Record<number, boolean>;
+        setCheckedItems(parsed);
+      } else {
+        setCheckedItems({});
+      }
+    } catch {
+      setCheckedItems({});
+    }
+  }, [checklistStorageKey]);
+
+  function toggleChecklistItem(idx: number) {
+    setCheckedItems((prev) => {
+      const next = { ...prev, [idx]: !prev[idx] };
+      if (checklistStorageKey && typeof window !== 'undefined') {
+        try {
+          window.localStorage.setItem(checklistStorageKey, JSON.stringify(next));
+        } catch {
+          // Ignore storage quota errors
+        }
+      }
+      return next;
+    });
+  }
 
   const documentCrossChecks = useMemo(() => {
     if (!extraction || !result) return [];
@@ -248,7 +284,7 @@ export default function HomePage() {
     setEvaluation(null);
     setIsDemoMode(false);
     setExpandLetter(false);
-    setCheckedItems({});
+    setShareFeedback(null);
     if (!restoredAccess) {
       setIsUnlocked(false);
     }
@@ -268,7 +304,9 @@ export default function HomePage() {
       setResult(processed);
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : 'Erreur inconnue lors du traitement.';
+        err instanceof Error
+          ? `${err.message} Si le document est partiel ou flou, ajoutez le texte de l’annonce ou une photo plus nette.`
+          : 'Erreur lors du traitement du fichier. Ajoutez le texte de l’annonce ou une photo plus nette.';
       setError(message);
     } finally {
       setLoadingFile(false);
@@ -436,7 +474,33 @@ export default function HomePage() {
     setTimeout(() => setCopiedKey(null), 2000);
   }
 
-  function handleExportPdf() {
+  async function handleShareReport() {
+    if (!fullReport || !evaluation || typeof window === 'undefined') return;
+    const summaryShare = `${fullReport.vehicleTitle} — Verdict : ${formatVerdictLabel(
+      evaluation.verdict
+    )} (${evaluation.scoreRisque}/100). ${fullReport.executiveSummary}`;
+
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: `Scanner Auto — ${fullReport.vehicleTitle}`,
+          text: summaryShare,
+          url: window.location.href,
+        });
+        setShareFeedback('Résumé partagé.');
+        setTimeout(() => setShareFeedback(null), 2000);
+        return;
+      } catch {
+        // Fallback to clipboard if user cancels or share fails
+      }
+    }
+
+    await navigator.clipboard.writeText(summaryShare);
+    setShareFeedback('Résumé copié pour partage.');
+    setTimeout(() => setShareFeedback(null), 2000);
+  }
+
+  function handlePrintReport() {
     if (typeof window === 'undefined') return;
     setExpandLetter(true);
     setTimeout(() => {
@@ -468,17 +532,26 @@ export default function HomePage() {
     ? `Débloquer le rapport complet (${totalPrice} € — mode test)`
     : `Débloquer le rapport complet — ${totalPrice} €`;
 
-  const roiAnchorText =
-    fullReport && fullReport.negotiationAdvice.suggestedDiscountDealer > 0
-      ? `Investissez ${totalPrice} € pour sécuriser votre achat et viser jusqu’à ${fullReport.negotiationAdvice.suggestedDiscountDealer.toLocaleString(
-          'fr-FR'
-        )} € d’argumentaire de négociation.`
-      : `Investissez ${totalPrice} € pour obtenir la check-list terrain, la stratégie de négociation et les messages vendeur prêts à l’envoi.`;
+  const isLowRiskHealthy =
+    evaluation &&
+    !evaluation.incompleteData &&
+    evaluation.verdict === 'FAVORABLE' &&
+    evaluation.scoreRisque < 30;
+
+  const roiAnchorText = !fullReport
+    ? ''
+    : isLowRiskHealthy
+      ? `Véhicule globalement fiable, mais sécurisez les 5 points qui piègent 80 % des acheteurs (kilométrage réel, historique, papiers) pour ${totalPrice} €.`
+      : fullReport.negotiationAdvice.suggestedDiscountDealer > 0
+        ? `Investissez ${totalPrice} € pour sécuriser votre achat et viser jusqu’à ${fullReport.negotiationAdvice.suggestedDiscountDealer.toLocaleString(
+            'fr-FR'
+          )} € d’argumentaire de négociation.`
+        : `Investissez ${totalPrice} € pour obtenir la check-list terrain, la stratégie de négociation et les messages vendeur prêts à l’envoi.`;
 
   const isPassActive = isUnlocked || restoredAccess;
 
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-100 p-4 sm:p-6 flex flex-col items-center justify-center print:bg-white print:text-black print:p-0">
+    <main className="min-h-screen bg-slate-950 text-slate-100 p-4 sm:p-6 pb-24 sm:pb-6 flex flex-col items-center justify-center print:bg-white print:text-black print:p-0">
       <div className="w-full max-w-2xl rounded-2xl border border-slate-800 bg-slate-900 p-5 sm:p-6 space-y-5 print:border-none print:bg-white print:max-w-none print:p-4">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 print:hidden">
           <div>
@@ -521,15 +594,33 @@ export default function HomePage() {
           />
         </label>
 
-        <div className="print:hidden">
-          <label className="block text-xs text-slate-400 mb-1">
-            Copiez-collez le texte de l’annonce ou vos notes (optionnel)
-          </label>
+        <div className="space-y-1.5 print:hidden">
+          <div className="flex items-center justify-between gap-2">
+            <label className="block text-xs text-slate-400">
+              Copiez-collez le texte de l’annonce ou vos notes (optionnel)
+            </label>
+            <button
+              type="button"
+              onClick={() => setShowLbcGuide((prev) => !prev)}
+              className="text-[11px] text-emerald-400 hover:underline cursor-pointer shrink-0"
+            >
+              {showLbcGuide ? 'Masquer l’aide' : 'Comment importer depuis Leboncoin ?'}
+            </button>
+          </div>
+
+          {showLbcGuide && (
+            <div className="rounded-lg bg-slate-950 border border-slate-800 p-3 text-xs text-slate-300 space-y-1">
+              <p className="font-semibold text-emerald-300">2 façons rapides sur mobile :</p>
+              <p>1. <strong>Capture d’écran :</strong> prenez une capture de l’annonce ou du CT et importez l’image ci-dessus.</p>
+              <p>2. <strong>Copier-coller :</strong> sélectionnez le titre, le prix, le kilométrage et la description de l’annonce, puis collez ici.</p>
+            </div>
+          )}
+
           <textarea
             rows={3}
             value={extraNotes}
             onChange={(e) => setExtraNotes(e.target.value)}
-            placeholder="Ex. Peugeot 208 1.2 PureTech 06/2019, 88 000 km, courroie à prévoir, 9 500 €..."
+            placeholder="Ex. Peugeot 208 1.2 PureTech 06/2019, 88 000 km, 8 900 €, courroie à prévoir..."
             className="w-full rounded-xl bg-slate-950 border border-slate-800 p-3 text-sm text-slate-100 focus:outline-none focus:border-emerald-400"
           />
         </div>
@@ -792,7 +883,10 @@ export default function HomePage() {
             )}
 
             {!isUnlocked && fullReport && (
-              <div className="rounded-xl bg-slate-900 border border-emerald-700/50 p-4 space-y-4 print:hidden">
+              <div
+                id="paywall-card"
+                className="rounded-xl bg-slate-900 border border-emerald-700/50 p-4 space-y-4 print:hidden"
+              >
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <p className="text-sm font-bold text-emerald-300">
@@ -827,7 +921,7 @@ export default function HomePage() {
                       <li key={idx}>{item}</li>
                     ))}
                   </ul>
-                  <div className="text-xs text-slate-400 blur-[4px] select-none pt-1">
+                  <div className="text-xs text-slate-400 blur-[5px] select-none pt-1">
                     • Estimation détaillée indépendant / concession et calcul du vrai prix d’achat incluant les travaux préventifs...
                     <br />• 3 modèles de messages vendeur (courtois, technique, négociation) et check-list interactive sur place.
                   </div>
@@ -895,11 +989,25 @@ export default function HomePage() {
                     </p>
                     <p className="font-semibold mt-1">{fullReport.vehicleTitle}</p>
                   </div>
-                  <div className="flex items-center gap-2 shrink-0 self-start print:hidden">
+                  <div className="flex flex-wrap items-center gap-2 shrink-0 self-start print:hidden">
                     <button
                       type="button"
-                      onClick={handleExportPdf}
+                      onClick={handleShareReport}
                       className="text-xs px-2.5 py-1.5 rounded-lg bg-slate-950 hover:bg-slate-800 border border-slate-700 text-slate-100 cursor-pointer"
+                    >
+                      {shareFeedback ?? 'Envoyer à un proche'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handlePrintReport}
+                      className="text-xs px-2.5 py-1.5 rounded-lg bg-slate-950 hover:bg-slate-800 border border-slate-700 text-slate-100 cursor-pointer"
+                    >
+                      Imprimer
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handlePrintReport}
+                      className="text-xs px-2.5 py-1.5 rounded-lg bg-slate-950 hover:bg-slate-800 border border-slate-700 text-emerald-300 cursor-pointer"
                     >
                       Télécharger PDF
                     </button>
@@ -961,12 +1069,7 @@ export default function HomePage() {
                             <input
                               type="checkbox"
                               checked={isChecked}
-                              onChange={() =>
-                                setCheckedItems((prev) => ({
-                                  ...prev,
-                                  [idx]: !prev[idx],
-                                }))
-                              }
+                              onChange={() => toggleChecklistItem(idx)}
                               className="mt-0.5 accent-emerald-500 shrink-0"
                             />
                             <span className={isChecked ? 'line-through text-slate-500' : ''}>
@@ -991,7 +1094,7 @@ export default function HomePage() {
                       }
                       className="text-xs px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-100 cursor-pointer shrink-0 print:hidden"
                     >
-                      {copiedKey === 'seller' ? 'Copié !' : 'Copier'}
+                      {copiedKey === 'seller' ? 'Copié ✓' : 'Copier'}
                     </button>
                   </div>
 
@@ -1078,7 +1181,7 @@ export default function HomePage() {
                             }
                             className="text-xs px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-100 cursor-pointer"
                           >
-                            {copiedKey === 'rar' ? 'Copié !' : 'Copier la lettre'}
+                            {copiedKey === 'rar' ? 'Copié ✓' : 'Copier la lettre'}
                           </button>
                         </div>
                       </div>
@@ -1166,7 +1269,7 @@ export default function HomePage() {
                     onClick={() => handleCopyText(magicUrl, 'magic')}
                     className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-100 cursor-pointer"
                   >
-                    {copiedKey === 'magic' ? 'Lien copié !' : 'Copier le lien'}
+                    {copiedKey === 'magic' ? 'Lien copié ✓' : 'Copier le lien'}
                   </button>
                   <a
                     href={magicUrl}
@@ -1199,6 +1302,22 @@ export default function HomePage() {
             'Outil d’aide à la décision basé sur l’analyse automatisée de données et documents fournis. Ne constitue pas une expertise automobile au sens de l’article L. 326-1 du Code de la route.'}
         </footer>
       </div>
+
+      {/* STICKY CTA MOBILE QUAND UN RÉSULTAT EST AFFICHÉ ET NON DÉBLOQUÉ */}
+      {evaluation && !isUnlocked && fullReport && (
+        <div className="sm:hidden fixed bottom-0 inset-x-0 z-30 bg-slate-950/95 border-t border-slate-800 px-4 py-2.5 flex items-center justify-between gap-3 print:hidden">
+          <div className="min-w-0">
+            <p className="text-[11px] text-slate-400 truncate">Pass 30 jours</p>
+            <p className="text-sm font-bold text-white">{totalPrice} €</p>
+          </div>
+          <a
+            href="#paywall-card"
+            className="shrink-0 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold px-4 py-2 text-xs transition"
+          >
+            Débloquer le rapport — {totalPrice} €
+          </a>
+        </div>
+      )}
     </main>
   );
 }
