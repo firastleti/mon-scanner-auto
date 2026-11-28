@@ -1,5 +1,14 @@
 @import "tailwindcss";
 
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  color-scheme: dark;
+}
+
 /* Scrollbars adaptées au thème sombre */
 ::-webkit-scrollbar {
   width: 6px;

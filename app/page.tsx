@@ -102,6 +102,7 @@ export default function HomePage() {
   const [waiverAccepted, setWaiverAccepted] = useState(false);
   const [isUnlocked, setIsUnlocked] = useState(false);
   const [restoredAccess, setRestoredAccess] = useState(false);
+  const [expandLetter, setExpandLetter] = useState(false);
   const [copiedKey, setCopiedKey] = useState<'seller' | 'rar' | 'magic' | null>(null);
 
   const [hunterEmail, setHunterEmail] = useState('');
@@ -156,8 +157,6 @@ export default function HomePage() {
     return (base + bump).toFixed(2).replace('.', ',');
   }, [includeCerfaBump]);
 
-  const priceBreakdownLabel = includeCerfaBump ? '19,90 € + 9,90 €' : '19,90 €';
-
   const fullReport: FullVehicleReport | null = useMemo(() => {
     if (!extraction || !evaluation) return null;
     return buildFullReport(extraction, evaluation);
@@ -186,6 +185,7 @@ export default function HomePage() {
     setExtraction(null);
     setEvaluation(null);
     setIsDemoMode(false);
+    setExpandLetter(false);
     if (!restoredAccess) {
       setIsUnlocked(false);
     }
@@ -658,27 +658,27 @@ export default function HomePage() {
                     <span className="text-lg font-bold text-white whitespace-nowrap block">
                       {totalPrice} €
                     </span>
-                    <span className="text-[11px] text-slate-400 block">
-                      {priceBreakdownLabel}
-                    </span>
+                    {includeCerfaBump && (
+                      <span className="text-[11px] text-emerald-300 block">
+                        19,90 € + 9,90 € option
+                      </span>
+                    )}
                   </div>
                 </div>
 
                 <div className="rounded-lg bg-slate-950/80 border border-slate-800 p-3 space-y-2 relative overflow-hidden">
                   <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-                    Aperçu de votre check-list sur place :
+                    Aperçu de votre check-list & négociation :
                   </p>
                   <ul className="list-disc list-inside text-xs text-slate-200 space-y-1">
                     {fullReport.inspectionChecklist.slice(0, 2).map((item, idx) => (
                       <li key={idx}>{item}</li>
                     ))}
                   </ul>
-                  {fullReport.inspectionChecklist.length > 2 && (
-                    <div className="text-xs text-slate-500 blur-[2px] select-none pt-1">
-                      • Vérifier l’absence de suintement d’huile au niveau du couvre-culasse et du turbo...
-                      <br />• Contrôler la concordance du numéro VIN sur le châssis et la carte grise...
-                    </div>
-                  )}
+                  <div className="text-xs text-slate-400 blur-[2px] select-none pt-1">
+                    • {fullReport.negotiationAdvice.argumentSummary}
+                    <br />• Message vendeur personnalisé prêt à copier pour demander les preuves d’entretien...
+                  </div>
                 </div>
 
                 <label className="flex items-start gap-2.5 text-xs text-slate-200 bg-slate-950 p-3 rounded-lg border border-slate-800 cursor-pointer">
@@ -714,7 +714,7 @@ export default function HomePage() {
                   onClick={handleLocalTestUnlock}
                   className="w-full rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold py-2.5 text-sm transition cursor-pointer"
                 >
-                  Débloquer le rapport complet ({totalPrice} € — {priceBreakdownLabel}, mode test)
+                  Débloquer le rapport complet ({totalPrice} € — mode test)
                 </button>
               </div>
             )}
@@ -800,27 +800,41 @@ export default function HomePage() {
                     </div>
 
                     <div className="space-y-2 pt-2 border-t border-slate-800">
-                      <div className="flex items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
                         <p className="text-xs font-semibold text-amber-300">
                           2. Modèle de Lettre Recommandée (LRAR — Litige / Vice caché)
                         </p>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            handleCopyText(
-                              fullReport.cerfaAndLitigationPack.registeredMailTemplate,
-                              'rar'
-                            )
-                          }
-                          className="text-xs px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-100 cursor-pointer shrink-0"
-                        >
-                          {copiedKey === 'rar' ? 'Copié !' : 'Copier la lettre'}
-                        </button>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => setExpandLetter((prev) => !prev)}
+                            className="text-xs px-2.5 py-1 rounded bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 cursor-pointer"
+                          >
+                            {expandLetter ? 'Réduire' : 'Afficher tout'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleCopyText(
+                                fullReport.cerfaAndLitigationPack.registeredMailTemplate,
+                                'rar'
+                              )
+                            }
+                            className="text-xs px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-100 cursor-pointer"
+                          >
+                            {copiedKey === 'rar' ? 'Copié !' : 'Copier la lettre'}
+                          </button>
+                        </div>
                       </div>
                       <p className="text-[11px] text-amber-200/80 bg-amber-950/30 p-2 rounded border border-amber-800/40">
-                        ⚠️ <strong>Information documentaire :</strong> Remplacez tous les champs entre crochets <code>[...]</code> et adaptez le délai (ex. 15 jours) à votre situation. Ce modèle ne remplace pas l’avis d’un avocat ou de votre protection juridique.
+                        ⚠️ <strong>Information documentaire & preuves :</strong> Remplacez tous les champs entre crochets <code>[...]</code> et adaptez le délai à votre situation. En cas de litige (notamment vice caché), la réunion de preuves objectives (factures, diagnostic, expertise) est déterminante. Ce modèle ne remplace pas l’avis d’un avocat ou d’une protection juridique.
                       </p>
-                      <pre className="rounded-lg bg-slate-900 border border-slate-800 p-3 text-xs text-slate-200 whitespace-pre-wrap max-h-64 overflow-auto">
+                      <pre
+                        style={{ colorScheme: 'dark' }}
+                        className={`rounded-lg bg-slate-900 border border-slate-800 p-3 text-xs text-slate-200 whitespace-pre-wrap ${
+                          expandLetter ? '' : 'max-h-64 overflow-auto'
+                        }`}
+                      >
                         {fullReport.cerfaAndLitigationPack.registeredMailTemplate}
                       </pre>
                     </div>
@@ -908,7 +922,10 @@ export default function HomePage() {
             <summary className="text-xs font-semibold text-slate-400 cursor-pointer">
               Voir les données techniques extraites (JSON)
             </summary>
-            <pre className="mt-2 max-h-72 overflow-auto rounded bg-slate-900 p-3 text-xs text-slate-200">
+            <pre
+              style={{ colorScheme: 'dark' }}
+              className="mt-2 max-h-72 overflow-auto rounded bg-slate-900 p-3 text-xs text-slate-200"
+            >
               {JSON.stringify(extraction, null, 2)}
             </pre>
           </details>
