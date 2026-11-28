@@ -11,7 +11,7 @@ const DEMO_SCENARIO: {
   notes: string;
   mockExtraction: VehicleExtraction;
 } = {
-  label: 'Démo 1-clic : Peugeot 208 1.2 PureTech (06/2019 — 88 000 km)',
+  label: 'Exemple : Peugeot 208 1.2 PureTech (06/2019 — 88 000 km)',
   notes: 'Peugeot 208 1.2 PureTech 06/2019, 88 000 km, courroie à prévoir, CT vierge.',
   mockExtraction: {
     marque: 'Peugeot',
@@ -67,6 +67,16 @@ function getHingeBadge(status: HingeStatus): { label: string; className: string 
   return null;
 }
 
+function formatCritAirSource(rawSource: string): string {
+  if (rawSource === 'norme_euro') {
+    return 'Selon la norme Euro inscrite sur le document';
+  }
+  if (rawSource === 'estimation_annee') {
+    return 'Estimation selon l’année de mise en circulation';
+  }
+  return 'Estimation indicative';
+}
+
 export default function HomePage() {
   const [loadingFile, setLoadingFile] = useState(false);
   const [loadingAi, setLoadingAi] = useState(false);
@@ -75,6 +85,7 @@ export default function HomePage() {
   const [extraNotes, setExtraNotes] = useState('');
   const [extraction, setExtraction] = useState<VehicleExtraction | null>(null);
   const [evaluation, setEvaluation] = useState<EngineEvaluationResult | null>(null);
+  const [isDemoMode, setIsDemoMode] = useState(false);
 
   const [manualMotor, setManualMotor] = useState('');
   const [manualYear, setManualYear] = useState('');
@@ -155,6 +166,7 @@ export default function HomePage() {
     setError(null);
     setExtraction(null);
     setEvaluation(null);
+    setIsDemoMode(false);
     if (!restoredAccess) {
       setIsUnlocked(false);
     }
@@ -270,6 +282,7 @@ export default function HomePage() {
   async function handleRunDemo() {
     resetAnalysisStates();
     setResult(null);
+    setIsDemoMode(true);
     setExtraNotes(DEMO_SCENARIO.notes);
     setLoadingAi(true);
 
@@ -368,7 +381,7 @@ export default function HomePage() {
             disabled={loadingFile || loadingAi}
             className="shrink-0 rounded-xl border border-slate-700 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 px-3.5 py-2 text-xs font-semibold text-emerald-300 transition cursor-pointer"
           >
-            Démo 1-clic
+            Exemple Démo 1-clic
           </button>
         </div>
 
@@ -384,6 +397,9 @@ export default function HomePage() {
           </span>
           <p className="text-xs text-slate-400 mt-1">
             Carte grise, rapport Histovec, contrôle technique ou photo
+          </p>
+          <p className="text-[11px] text-slate-500 mt-1.5">
+            🔒 Confidentialité : vos documents sont traités instantanément et ne sont jamais conservés sur nos serveurs.
           </p>
           <input
             type="file"
@@ -443,6 +459,22 @@ export default function HomePage() {
 
         {evaluation && (
           <div className="rounded-xl bg-slate-950 border border-slate-800 p-4 space-y-4">
+            {isDemoMode && (
+              <div className="rounded-lg bg-indigo-950/50 border border-indigo-700/60 px-3 py-2 text-xs text-indigo-200 flex items-center justify-between">
+                <span>💡 Ceci est une simulation d’exemple (Peugeot 208).</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    resetAnalysisStates();
+                    setExtraNotes('');
+                  }}
+                  className="underline hover:text-white ml-2 shrink-0 cursor-pointer"
+                >
+                  Effacer
+                </button>
+              </div>
+            )}
+
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span
                 className={`px-3 py-1 rounded-full border text-xs font-bold ${verdictBadgeClass}`}
@@ -526,19 +558,24 @@ export default function HomePage() {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
               <div className="rounded-lg bg-slate-900 p-3 border border-slate-800">
-                <p className="text-xs text-slate-400">Estimation réparations</p>
+                <p className="text-xs text-slate-400">Estimation réparations préventives</p>
                 <p className="mt-1 font-semibold">
                   Indépendant : {evaluation.estimatedRepairCost.independant} €
                 </p>
                 <p className="text-xs text-slate-300">
                   Concession : {evaluation.estimatedRepairCost.concession} €
                 </p>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Hors casse moteur majeure ou turbo.
+                </p>
               </div>
 
               <div className="rounded-lg bg-slate-900 p-3 border border-slate-800">
                 <p className="text-xs text-slate-400">Vignette Crit’Air</p>
                 <p className="mt-1 font-semibold">{evaluation.critAir.vignette}</p>
-                <p className="text-xs text-slate-400">Source : {evaluation.critAir.source}</p>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  {formatCritAirSource(evaluation.critAir.source)}
+                </p>
               </div>
             </div>
 
@@ -581,20 +618,39 @@ export default function HomePage() {
               </div>
             )}
 
+            {/* TEASER GRATUIT + PAYWALL */}
             {!isUnlocked && fullReport && (
-              <div className="rounded-xl bg-slate-900 border border-emerald-700/50 p-4 space-y-3">
+              <div className="rounded-xl bg-slate-900 border border-emerald-700/50 p-4 space-y-4">
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <p className="text-sm font-bold text-emerald-300">
                       Pass 30 jours — Rapport complet & Négociation
                     </p>
                     <p className="text-xs text-slate-400 mt-0.5">
-                      Inclut la check-list d’inspection, la marge de négociation et le message vendeur prêt à envoyer.
+                      Inclut la check-list d’inspection complète, la marge de négociation chiffrée et le message vendeur prêt à envoyer.
                     </p>
                   </div>
                   <span className="text-lg font-bold text-white whitespace-nowrap shrink-0">
                     {totalPrice} €
                   </span>
+                </div>
+
+                {/* APERÇU GRATUIT (TEASER) */}
+                <div className="rounded-lg bg-slate-950/80 border border-slate-800 p-3 space-y-2 relative overflow-hidden">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                    Aperçu de votre check-list sur place :
+                  </p>
+                  <ul className="list-disc list-inside text-xs text-slate-200 space-y-1">
+                    {fullReport.inspectionChecklist.slice(0, 2).map((item, idx) => (
+                      <li key={idx}>{item}</li>
+                    ))}
+                  </ul>
+                  {fullReport.inspectionChecklist.length > 2 && (
+                    <div className="text-xs text-slate-500 blur-[2px] select-none pt-1">
+                      • Vérifier l’absence de suintement d’huile au niveau du couvre-culasse et du turbo...
+                      <br />• Contrôler la concordance du numéro VIN sur le châssis et la carte grise...
+                    </div>
+                  )}
                 </div>
 
                 <label className="flex items-start gap-2.5 text-xs text-slate-200 bg-slate-950 p-3 rounded-lg border border-slate-800 cursor-pointer">
@@ -604,9 +660,15 @@ export default function HomePage() {
                     onChange={(e) => setIncludeCerfaBump(e.target.checked)}
                     className="mt-0.5 accent-emerald-500 shrink-0"
                   />
-                  <span>
-                    <strong>Option (+9,90 €) :</strong> Pack démarches & recours (guide Cerfa + trame courrier recommandé RAR).
-                  </span>
+                  <div className="space-y-1">
+                    <p className="font-semibold text-amber-300">
+                      Option (+9,90 €) : Pack Démarches & Protection Litige
+                    </p>
+                    <ul className="list-disc list-inside text-[11px] text-slate-300 space-y-0.5">
+                      <li><strong>Avant l’achat :</strong> Guide pas-à-pas cession (Cerfa 15776*02) & ANTS.</li>
+                      <li><strong>Après l’achat :</strong> Modèle de Lettre Recommandée (LRAR) pour vice caché.</li>
+                    </ul>
+                  </div>
                 </label>
 
                 <label className="flex items-start gap-2.5 text-xs text-slate-300 cursor-pointer">
@@ -629,16 +691,31 @@ export default function HomePage() {
               </div>
             )}
 
+            {/* RAPPORT DÉBLOQUÉ */}
             {isUnlocked && fullReport && (
               <div className="rounded-xl bg-slate-900 border border-emerald-600/60 p-4 space-y-4 text-sm">
-                <div>
-                  <p className="text-xs uppercase tracking-wider text-emerald-400 font-semibold">
-                    Rapport détaillé débloqué
-                    {includeCerfaBump ? ' + Pack Cerfa / RAR' : ''}
-                  </p>
-                  <p className="font-semibold mt-1">{fullReport.vehicleTitle}</p>
-                  <p className="text-xs text-slate-300 mt-1">{fullReport.executiveSummary}</p>
+                <div className="flex items-center justify-between gap-2 border-b border-slate-800 pb-2">
+                  <div>
+                    <p className="text-xs uppercase tracking-wider text-emerald-400 font-semibold">
+                      Pass 30 jours actif — Rapport détaillé
+                      {includeCerfaBump ? ' + Pack Démarches/LRAR' : ''}
+                    </p>
+                    <p className="font-semibold mt-1">{fullReport.vehicleTitle}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setResult(null);
+                      setExtraNotes('');
+                      resetAnalysisStates();
+                    }}
+                    className="text-xs px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-300 shrink-0 cursor-pointer"
+                  >
+                    + Analyser un autre véhicule
+                  </button>
                 </div>
+
+                <p className="text-xs text-slate-300">{fullReport.executiveSummary}</p>
 
                 <div className="rounded-lg bg-slate-950 p-3 border border-slate-800 space-y-1">
                   <p className="text-xs font-semibold text-emerald-400">Stratégie de négociation</p>
@@ -649,7 +726,7 @@ export default function HomePage() {
 
                 <div className="space-y-1.5">
                   <p className="text-xs font-semibold text-slate-200">
-                    Check-list avant déplacement & essai
+                    Check-list complète avant déplacement & essai
                   </p>
                   <ul className="list-disc list-inside text-xs text-slate-300 space-y-1">
                     {fullReport.inspectionChecklist.map((item, idx) => (
@@ -679,12 +756,12 @@ export default function HomePage() {
                 {includeCerfaBump && (
                   <div className="rounded-xl bg-slate-950 border border-amber-600/50 p-4 space-y-3">
                     <p className="text-xs font-bold uppercase tracking-wider text-amber-300">
-                      Pack Cerfa & Recours (RAR)
+                      Pack Démarches & Lettre Recommandée (LRAR)
                     </p>
 
                     <div className="space-y-1.5">
                       <p className="text-xs font-semibold text-slate-200">
-                        Démarches cession (Cerfa 15776*02) & immatriculation
+                        1. Démarches cession (Cerfa 15776*02) & immatriculation
                       </p>
                       <ul className="list-disc list-inside text-xs text-slate-300 space-y-1">
                         {fullReport.cerfaAndLitigationPack.cessionAndRegistrationSteps.map(
@@ -695,10 +772,10 @@ export default function HomePage() {
                       </ul>
                     </div>
 
-                    <div className="space-y-2 pt-1">
+                    <div className="space-y-2 pt-2 border-t border-slate-800">
                       <div className="flex items-center justify-between gap-2">
                         <p className="text-xs font-semibold text-amber-300">
-                          Trame courrier recommandé (RAR — Litige / Vice caché)
+                          2. Modèle de Lettre Recommandée (LRAR — Litige / Vice caché)
                         </p>
                         <button
                           type="button"
@@ -710,9 +787,12 @@ export default function HomePage() {
                           }
                           className="text-xs px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-100 cursor-pointer shrink-0"
                         >
-                          {copiedKey === 'rar' ? 'Copié !' : 'Copier la trame'}
+                          {copiedKey === 'rar' ? 'Copié !' : 'Copier la lettre'}
                         </button>
                       </div>
+                      <p className="text-[11px] text-amber-200/80 bg-amber-950/30 p-2 rounded border border-amber-800/40">
+                        ⚠️ <strong>Information documentaire :</strong> Remplacez tous les champs entre crochets <code>[...]</code> et adaptez le délai (ex. 15 jours) à votre situation. Ce modèle ne remplace pas l’avis d’un avocat ou de votre protection juridique.
+                      </p>
                       <pre className="rounded-lg bg-slate-900 border border-slate-800 p-3 text-xs text-slate-200 whitespace-pre-wrap max-h-64 overflow-auto">
                         {fullReport.cerfaAndLitigationPack.registeredMailTemplate}
                       </pre>
@@ -724,6 +804,7 @@ export default function HomePage() {
           </div>
         )}
 
+        {/* CHASSEUR DE CT (MAGIC LINK) REMONTÉ DANS LE TUNNEL */}
         <form
           onSubmit={handleGenerateMagicLink}
           className="rounded-xl bg-slate-950 border border-slate-800 p-4 space-y-3"
@@ -733,7 +814,7 @@ export default function HomePage() {
               Chasseur de CT — Revenir quand le vendeur répond
             </p>
             <p className="text-xs text-slate-400 mt-0.5">
-              Pas encore le rapport Histovec ou le CT ? Génère un lien de reprise pour rouvrir ce dossier dès réception.
+              Pas encore le rapport Histovec ou le contrôle technique ? Recevez un lien par email pour relancer l’analyse dès que le vendeur vous les envoie.
             </p>
           </div>
 
@@ -759,7 +840,7 @@ export default function HomePage() {
             disabled={loadingMagic}
             className="w-full rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 py-2 text-xs font-semibold text-emerald-300 transition cursor-pointer"
           >
-            {loadingMagic ? 'Création du lien...' : 'Créer mon Magic Link de reprise'}
+            {loadingMagic ? 'Création du lien...' : 'Recevoir mon Magic Link de reprise'}
           </button>
 
           {magicUrl && (
@@ -799,7 +880,7 @@ export default function HomePage() {
         {extraction && (
           <details className="rounded-xl bg-slate-950 border border-slate-800 p-3">
             <summary className="text-xs font-semibold text-slate-400 cursor-pointer">
-              Voir le JSON extrait par Gemini
+              Voir les données techniques extraites (JSON)
             </summary>
             <pre className="mt-2 max-h-72 overflow-auto rounded bg-slate-900 p-3 text-xs text-slate-200">
               {JSON.stringify(extraction, null, 2)}

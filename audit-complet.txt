@@ -1,0 +1,2764 @@
+==========================================
+FICHIER : .gitignore
+==========================================
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files (can opt-in for committing if needed)
+.env*
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+
+==========================================
+FICHIER : AGENTS.md
+==========================================
+<!-- BEGIN:nextjs-agent-rules -->
+
+## This is NOT the Next.js you know
+
+This version has breaking changes â€” APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` â€” verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->
+
+
+==========================================
+FICHIER : README.md
+==========================================
+This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+
+## Getting Started
+
+First, run the development server:
+
+```bash
+npm run dev
+# or
+yarn dev
+# or
+pnpm dev
+# or
+bun dev
+```
+
+Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+
+You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+
+This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+
+## Learn More
+
+To learn more about Next.js, take a look at the following resources:
+
+- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
+- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+
+You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+
+## Deploy on Vercel
+
+The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+
+Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+
+==========================================
+FICHIER : app/api/checkout/route.ts
+==========================================
+import { NextRequest, NextResponse } from 'next/server';
+import Stripe from 'stripe';
+
+const PASS_30J_CENTS = 1990; // 19,90 â‚¬
+const CERFA_BUMP_CENTS = 990; // +9,90 â‚¬
+
+export async function POST(req: NextRequest) {
+  try {
+    const secretKey = process.env.STRIPE_SECRET_KEY?.trim();
+    if (!secretKey) {
+      return NextResponse.json(
+        {
+          error:
+            'STRIPE_SECRET_KEY non configurÃ©e dans .env.local. Ajoute ta clÃ© test Stripe (sk_test_...) pour activer le paiement rÃ©el.',
+        },
+        { status: 500 }
+      );
+    }
+
+    const body = await req.json();
+    const includeCerfaBump = Boolean(body?.includeCerfaBump);
+    const waiverAccepted = Boolean(body?.waiverAccepted);
+    const vehicleTitle =
+      typeof body?.vehicleTitle === 'string' && body.vehicleTitle.trim()
+        ? body.vehicleTitle.trim()
+        : 'Rapport Scanner Auto';
+
+    if (!waiverAccepted) {
+      return NextResponse.json(
+        {
+          error:
+            'La renonciation expresse au droit de rÃ©tractation (Art. L. 221-28 13Â°) est obligatoire.',
+        },
+        { status: 400 }
+      );
+    }
+
+    const stripe = new Stripe(secretKey);
+
+    const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = [
+      {
+        price_data: {
+          currency: 'eur',
+          product_data: {
+            name: 'Pass 30 jours â€” Rapport complet & NÃ©gociation',
+            description: `Analyse dÃ©taillÃ©e, check-list inspection & script vendeur (${vehicleTitle})`,
+          },
+          unit_amount: PASS_30J_CENTS,
+        },
+        quantity: 1,
+      },
+    ];
+
+    if (includeCerfaBump) {
+      lineItems.push({
+        price_data: {
+          currency: 'eur',
+          product_data: {
+            name: 'Option â€” Pack dÃ©marches Cerfa & Recours RAR',
+            description: 'Guide cession Cerfa 15776*02 + trame courrier recommandÃ©',
+          },
+          unit_amount: CERFA_BUMP_CENTS,
+        },
+        quantity: 1,
+      });
+    }
+
+    const origin = req.nextUrl.origin;
+    const session = await stripe.checkout.sessions.create({
+      mode: 'payment',
+      line_items: lineItems,
+      metadata: {
+        includeCerfaBump: includeCerfaBump ? 'true' : 'false',
+        waiverAccepted: 'true',
+      },
+      success_url: `${origin}/?checkout=success&session_id={CHECKOUT_SESSION_ID}&cerfa=${
+        includeCerfaBump ? '1' : '0'
+      }`,
+      cancel_url: `${origin}/?checkout=cancelled`,
+    });
+
+    return NextResponse.json({ url: session.url, sessionId: session.id });
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : 'Erreur lors de la crÃ©ation de la session Stripe.';
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
+==========================================
+FICHIER : app/api/checkout/verify/route.ts
+==========================================
+import { NextRequest, NextResponse } from 'next/server';
+import Stripe from 'stripe';
+
+export async function GET(req: NextRequest) {
+  try {
+    const secretKey = process.env.STRIPE_SECRET_KEY?.trim();
+    if (!secretKey) {
+      return NextResponse.json(
+        { error: 'STRIPE_SECRET_KEY non configurÃ©e.' },
+        { status: 500 }
+      );
+    }
+
+    const sessionId = req.nextUrl.searchParams.get('session_id')?.trim();
+    if (!sessionId) {
+      return NextResponse.json(
+        { error: 'session_id manquant.' },
+        { status: 400 }
+      );
+    }
+
+    const stripe = new Stripe(secretKey);
+    const session = await stripe.checkout.sessions.retrieve(sessionId);
+
+    const paid = session.payment_status === 'paid';
+    const includeCerfaBump = session.metadata?.includeCerfaBump === 'true';
+
+    return NextResponse.json({
+      paid,
+      includeCerfaBump,
+      amountTotalCents: session.amount_total ?? null,
+    });
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : 'Erreur lors de la vÃ©rification du paiement Stripe.';
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
+==========================================
+FICHIER : app/api/evaluate/route.ts
+==========================================
+import { NextRequest, NextResponse } from 'next/server';
+import { evaluateVehicle } from '@/lib/engineRules';
+import type { VehicleExtraction } from '@/lib/geminiExtractor';
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const extraction = body?.extraction as VehicleExtraction | undefined;
+
+    if (!extraction || typeof extraction !== 'object') {
+      return NextResponse.json(
+        { error: 'Objet extraction manquant ou invalide.' },
+        { status: 400 }
+      );
+    }
+
+    const evaluation = evaluateVehicle(extraction);
+    return NextResponse.json({ evaluation });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : 'Erreur lors de lâ€™Ã©valuation du vÃ©hicule.';
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
+==========================================
+FICHIER : app/api/extract/route.ts
+==========================================
+import { NextRequest, NextResponse } from 'next/server';
+import { extractVehicleData } from '@/lib/geminiExtractor';
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const { imageDataUrl, pdfText, extraNotes } = body ?? {};
+
+    if (!imageDataUrl && !pdfText && !extraNotes) {
+      return NextResponse.json(
+        { error: 'Aucune donnÃ©e Ã  analyser (image, PDF ou texte requis).' },
+        { status: 400 }
+      );
+    }
+
+    const extraction = await extractVehicleData({
+      imageDataUrl,
+      pdfText,
+      extraNotes,
+    });
+
+    return NextResponse.json({ extraction });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : 'Erreur serveur lors de lâ€™extraction.';
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
+==========================================
+FICHIER : app/api/magic-link/route.ts
+==========================================
+import { NextRequest, NextResponse } from 'next/server';
+import { Resend } from 'resend';
+import { createMagicToken, verifyMagicToken } from '@/lib/magicLink';
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const email = typeof body?.email === 'string' ? body.email.trim() : '';
+    const vehicleHint =
+      typeof body?.vehicleHint === 'string' ? body.vehicleHint.trim() : '';
+    const notes = typeof body?.notes === 'string' ? body.notes.trim() : undefined;
+    const passUnlocked = Boolean(body?.passUnlocked);
+    const includeCerfa = Boolean(body?.includeCerfa);
+
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return NextResponse.json(
+        { error: 'Merci dâ€™indiquer une adresse email valide.' },
+        { status: 400 }
+      );
+    }
+
+    if (!vehicleHint) {
+      return NextResponse.json(
+        { error: 'Merci dâ€™indiquer le vÃ©hicule ou la rÃ©fÃ©rence de lâ€™annonce.' },
+        { status: 400 }
+      );
+    }
+
+    const token = createMagicToken({
+      email,
+      vehicleHint,
+      notes,
+      passUnlocked,
+      includeCerfa,
+      createdAt: new Date().toISOString(),
+    });
+
+    const origin = req.nextUrl.origin;
+    const magicUrl = `${origin}/?ml=${encodeURIComponent(token)}`;
+
+    const subject = `Ton dossier Scanner Auto : ${vehicleHint}`;
+    const textBody = `DÃ¨s que le vendeur tâ€™envoie le rapport Histovec ou le ContrÃ´le Technique, ouvre ton dossier ici : ${magicUrl}`;
+    const htmlBody = `
+      <div style="font-family: Arial, sans-serif; line-height: 1.5; color: #0f172a;">
+        <h2 style="margin-bottom: 8px;">Scanner Auto â€” Lien de reprise de dossier</h2>
+        <p>VÃ©hicule visÃ© : <strong>${escapeHtml(vehicleHint)}</strong></p>
+        <p>DÃ¨s que le vendeur tâ€™envoie le rapport Histovec ou le ContrÃ´le Technique, clique sur le bouton ci-dessous pour rouvrir ton dossier prÃ©-rempli :</p>
+        <p style="margin: 20px 0;">
+          <a href="${escapeHtml(magicUrl)}" style="background: #10b981; color: #020617; padding: 10px 16px; border-radius: 8px; text-decoration: none; font-weight: bold;">
+            Ouvrir mon dossier Scanner Auto
+          </a>
+        </p>
+        <p style="font-size: 12px; color: #475569;">Si le bouton ne sâ€™affiche pas, copie ce lien : ${escapeHtml(magicUrl)}</p>
+      </div>
+    `;
+
+    const resendApiKey = process.env.RESEND_API_KEY?.trim();
+    const fromAddress =
+      process.env.MAGIC_LINK_FROM?.trim() || 'Scanner Auto <onboarding@resend.dev>';
+
+    let emailSent = false;
+    let emailError: string | null = null;
+
+    if (resendApiKey) {
+      const resend = new Resend(resendApiKey);
+      const { error } = await resend.emails.send({
+        from: fromAddress,
+        to: [email],
+        subject,
+        html: htmlBody,
+        text: textBody,
+      });
+
+      if (error) {
+        emailError = error.message;
+      } else {
+        emailSent = true;
+      }
+    }
+
+    return NextResponse.json({
+      ok: true,
+      email,
+      magicUrl,
+      emailSent,
+      emailError,
+      emailPreview: {
+        subject,
+        body: textBody,
+      },
+    });
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : 'Erreur lors de la gÃ©nÃ©ration du Magic Link.';
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
+export async function GET(req: NextRequest) {
+  const token = req.nextUrl.searchParams.get('token') ?? '';
+  const payload = verifyMagicToken(token);
+
+  if (!payload) {
+    return NextResponse.json(
+      { error: 'Lien magique invalide ou corrompu.' },
+      { status: 400 }
+    );
+  }
+
+  return NextResponse.json({ payload });
+}
+
+==========================================
+FICHIER : app/api/webhooks/stripe/route.ts
+==========================================
+import { NextRequest, NextResponse } from 'next/server';
+import Stripe from 'stripe';
+
+export async function POST(req: NextRequest) {
+  const secretKey = process.env.STRIPE_SECRET_KEY?.trim();
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET?.trim();
+
+  if (!secretKey || !webhookSecret) {
+    return NextResponse.json(
+      { error: 'Configuration Stripe webhook incomplÃ¨te.' },
+      { status: 500 }
+    );
+  }
+
+  const signature = req.headers.get('stripe-signature');
+  if (!signature) {
+    return NextResponse.json(
+      { error: 'En-tÃªte stripe-signature manquant.' },
+      { status: 400 }
+    );
+  }
+
+  try {
+    const rawBody = await req.text();
+    const stripe = new Stripe(secretKey);
+    const event = stripe.webhooks.constructEvent(rawBody, signature, webhookSecret);
+
+    if (event.type === 'checkout.session.completed') {
+      const session = event.data.object as Stripe.Checkout.Session;
+      // Ici tu pourras dÃ©clencher l'envoi email / journalisation de commande payÃ©e
+      console.log('Paiement Stripe confirmÃ© :', {
+        sessionId: session.id,
+        amountTotal: session.amount_total,
+        includeCerfaBump: session.metadata?.includeCerfaBump === 'true',
+      });
+    }
+
+    return NextResponse.json({ received: true });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : 'Signature webhook invalide.';
+    return NextResponse.json({ error: message }, { status: 400 });
+  }
+}
+
+==========================================
+FICHIER : app/favicon.ico
+==========================================
+    00     ¨%  6          ¨  Þ%       h  †6  (   0   `           $                                                                                        7   o   ¤   Í   ç   ö   þ   þ   ö   ç   Í   ¤   o   7                                                                                                                             (   s   ¼   ê   ü   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ü   ê   ¼   s   (                                                                                                         .   ’   â   þ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   þ   ã   ‘   .                                                                                             }   ã   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ã   |                                                                                 ;   À   ý   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿý¿;                                                                     ^   ã   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿÿÿÿã^                                                             r   ñ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿÿÿ'''ÿÿÿñ   r                                                     r   ô   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿÿ<<<ÿ444ÿ)))ÿÿÿ   ô   r                                              ^   ñ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿÿMMMÿLLLÿBBBÿ+++ÿÿ   ÿ   ÿ   ñ   ^                                       <   â   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿÿUUUÿdddÿYYYÿFFFÿÿ   ÿ   ÿ   ÿ   ÿ   â   <                                  ¿   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿÿSSSÿ|||ÿqqqÿcccÿ%%%ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ¿                              }   þ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿÿHHHÿÿ‰‰‰ÿ~~~ÿBBBÿÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   þ   }                       /   â   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ555ÿžžžÿ¡¡¡ÿ———ÿeeeÿÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   â   /                  ‘   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ!!!ÿ¡¡¡ÿºººÿ¯¯¯ÿ‹‹‹ÿÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ‘              )   â   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿXXXÿ™™™ÿ˜˜˜ÿ\\\ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿÿ–––ÿÒÒÒÿÆÆÆÿ°°°ÿ:::ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   á   )           s   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ–––ÿÿÿÿÿÿÿÿÿÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿÿ€€€ÿçççÿÝÝÝÿÐÐÐÿcccÿÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   s          ¼   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ–––ÿÿÿÿÿÿÿÿÿÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ\\\ÿñññÿöööÿìììÿ“““ÿÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ¼      7   é   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ–––ÿÿÿÿÿÿÿÿÿÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ777ÿÞÞÞÿÿÿÿÿÿÿÿÿÆÆÆÿ!!!ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   é   7   o   ü   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ–––ÿÿÿÿÿÿÿÿÿÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿÿ¿¿¿ÿÿÿÿÿÿÿÿÿæææÿBBBÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ü   o   ¤   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ–––ÿÿÿÿÿÿÿÿÿÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ			ÿ˜˜˜ÿÿÿÿÿÿÿÿÿöööÿiiiÿÿÿÿÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ¤   Í   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ–––ÿÿÿÿÿÿÿÿÿÿ   ÿ   ÿ   ÿ   ÿ   ÿÿnnnÿøøøÿÿÿÿÿÿÿÿÿ”””ÿÿÿÿÿÿÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   Ì   ç   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ–––ÿÿÿÿÿÿÿÿÿÿ   ÿ   ÿ   ÿ   ÿ   ÿEEEÿèèèÿÿÿÿÿÿÿÿÿ»»»ÿÿ   ÿÿ$$$ÿ$$$ÿÿÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ç   ö   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ–––ÿÿÿÿÿÿÿÿÿÿ   ÿ   ÿ   ÿ   ÿ%%%ÿÎÎÎÿÿÿÿÿÿÿÿÿÛÛÛÿ333ÿ   ÿ   ÿÿ666ÿ777ÿ+++ÿÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ö   þ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ–––ÿÿÿÿÿÿÿÿÿÿ   ÿ   ÿ   ÿÿªªªÿÿÿÿÿÿÿÿÿðððÿVVVÿ   ÿ   ÿ   ÿÿHHHÿIIIÿ:::ÿÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   þ   þ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ–––ÿÿÿÿÿÿÿÿÿÿ   ÿ   ÿÿ€€€ÿüüüÿÿÿÿÿüüüÿ€€€ÿÿ   ÿ   ÿ   ÿ   ÿZZZÿ[[[ÿHHHÿÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   þ   ö   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ–––ÿÿÿÿÿÿÿÿÿÿ   ÿ   ÿVVVÿðððÿÿÿÿÿÿÿÿÿ©©©ÿÿ   ÿ   ÿ   ÿ   ÿ&&&ÿlllÿnnnÿWWWÿÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ö   ç   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ–––ÿÿÿÿÿÿÿÿÿÿ   ÿ222ÿÚÚÚÿÿÿÿÿÿÿÿÿÍÍÍÿ%%%ÿ   ÿ   ÿ   ÿ   ÿ   ÿ---ÿ~~~ÿ€€€ÿeeeÿÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ç   Í   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ–––ÿÿÿÿÿÿÿÿÿœœœÿÿºººÿÿÿÿÿÿÿÿÿçççÿEEEÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ333ÿÿ’’’ÿtttÿÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   Í   ¤   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ–––ÿÿÿÿÿÿÿÿÿ¤¤¤ÿ’’’ÿþþþÿÿÿÿÿ÷÷÷ÿlllÿÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ:::ÿ¢¢¢ÿ¥¥¥ÿ‚‚‚ÿ
+
+
+ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ¤   o   ü   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ–––ÿÿÿÿÿÿÿÿÿèèèÿôôôÿÿÿÿÿÿÿÿÿ–––ÿ			ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ@@@ÿ´´´ÿ···ÿÿÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ü   o   7   é   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ–––ÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿ½½½ÿÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿFFFÿÆÆÆÿÉÉÉÿŸŸŸÿÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   é   7      ¼   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ–––ÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÜÜÜÿ444ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿMMMÿØØØÿÜÜÜÿ­­­ÿÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ¼          s   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ–––ÿÿÿÿÿÿÿÿÿÿÿÿÿñññÿYYYÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿUUUÿïïïÿóóóÿ¿¿¿ÿÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   s           )   á   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿXXXÿ™™™ÿ–––ÿ˜˜˜ÿfffÿÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ444ÿ’’’ÿ”””ÿuuuÿ			ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   â   )              ‘   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ‘                  /   â   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   â   /                       }   þ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   þ   }                              ¿   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ¾                                  <   â   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   â   <                                       ^   ñ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ñ   ^                                              r   ô   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ô   r                                                     r   ñ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ñ   r                                                             ^   ã   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ã   ^                                                                     ;   À   ý   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ý   À   ;                                                                                 }   ã   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ã   }                                                                                             .   ‘   ã   þ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   þ   â   ’   .                                                                                                         (   s   ¼   ê   ü   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ü   ê   ¼   s   (                                                                                                                             7   o   ¤   Í   ç   ö   þ   þ   ö   ç   Í   ¤   o   7                                                                   ÿÿàÿÿ  ÿÿ  ÿÿ  ÿø  ÿ  ÿð  ÿ  ÿÀ  ÿ  ÿ€  ÿ  ÿ    ÿ  þ      ü    ?  ø      ð      ð      à      À      À      À      €      €      €                                                                                      €      €      €      À      À      À      à      ð      ð      ø      ü    ?  þ      ÿ    ÿ  ÿ€  ÿ  ÿÀ  ÿ  ÿð  ÿ  ÿø  ÿ  ÿÿ  ÿÿ  ÿÿàÿÿ  (       @                                                                       )   m   ­   Ú   ò   ý   ý   ò   Ú   ­   l   )                                                                         7   ˜   ß   û   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   û   ß   ˜   7                                                             Š   ê   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   êŠ                                               6   Ã   þ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿÿþÂ6                                       A   Ù   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿÿÿ'''ÿÿÙ   A                               6   Ù   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿÿGGGÿ:::ÿÿ   ÿ   Ù   6                          Â   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿÿ___ÿ```ÿ000ÿÿ   ÿ   ÿ   Â                     Š   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿÿkkkÿ†††ÿWWWÿ
+
+
+ÿ   ÿ   ÿ   ÿ   ÿ   Š              8   é   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿÿiiiÿ¨¨¨ÿƒƒƒÿÿ   ÿ   ÿ   ÿ   ÿ   ÿ   é   8          —   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ+++ÿkkkÿKKKÿÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿYYYÿÅÅÅÿ²²²ÿ===ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   —      *   ß   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿiiiÿÿÿÿÿ···ÿÿ   ÿ   ÿ   ÿ   ÿ   ÿ@@@ÿ×××ÿßßßÿlllÿÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   Þ   *   m   û   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿiiiÿÿÿÿÿ···ÿÿ   ÿ   ÿ   ÿ   ÿ"""ÿÊÊÊÿÿÿÿÿ¥¥¥ÿÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   û   m   ­   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿiiiÿÿÿÿÿ···ÿÿ   ÿ   ÿ   ÿÿ¥¥¥ÿÿÿÿÿÑÑÑÿ(((ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ­   Ù   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿiiiÿÿÿÿÿ···ÿÿ   ÿ   ÿÿ{{{ÿüüüÿêêêÿIIIÿÿÿÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   Ù   ò   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿiiiÿÿÿÿÿ···ÿÿ   ÿ   ÿQQQÿîîîÿúúúÿqqqÿÿÿ***ÿÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ò   ý   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿiiiÿÿÿÿÿ···ÿÿ   ÿ...ÿ×××ÿÿÿÿÿ›››ÿ
+
+
+ÿ   ÿ%%%ÿFFFÿ&&&ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ý   ý   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿiiiÿÿÿÿÿ···ÿÿÿ¶¶¶ÿÿÿÿÿÂÂÂÿÿ   ÿ   ÿ444ÿbbbÿ666ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ý   ò   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿiiiÿÿÿÿÿ¶¶¶ÿÿŒŒŒÿÿÿÿÿàààÿ888ÿ   ÿ   ÿ   ÿCCCÿ~~~ÿEEEÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ò   Ù   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿiiiÿÿÿÿÿ¶¶¶ÿhhhÿõõõÿôôôÿ^^^ÿ   ÿ   ÿ   ÿ   ÿRRRÿšššÿUUUÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   Ù   ­   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿiiiÿÿÿÿÿâââÿæææÿþþþÿ‡‡‡ÿÿ   ÿ   ÿ   ÿ   ÿaaaÿ¶¶¶ÿdddÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ¬   m   û   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿiiiÿÿÿÿÿÿÿÿÿÿÿÿÿ±±±ÿÿ   ÿ   ÿ   ÿ   ÿ   ÿpppÿÒÒÒÿtttÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   û   l   *   ß   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿiiiÿÿÿÿÿÿÿÿÿÓÓÓÿ***ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿÿðððÿ„„„ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   Þ   *      —   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ+++ÿiiiÿjjjÿ666ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ888ÿiiiÿ:::ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   —          8   é   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   é   8              Š   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   Š                     Â   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   Â                          6   Ù   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   Ù   6                               A   Ù   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   Ù   A                                       6   Ã   þ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   þ   Ã   6                                                  Š   ê   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ê   Š                                                             7   ˜   ß   û   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   û   ß   ˜   7                                                                         )   m   ­   Ú   ò   ý   ý   ò   Ú   ­   m   )                                       ÿðÿÿ€ÿþ  ü  ?ø  ð  à  À  À  €  €  €                                  €  €  €  À  À  à  ð  ø  ü  ?þ  ÿ€ÿÿðÿ(                                                      I   ¨   ä   û   û   ä   ¨   I                             ’   ï   ÿ   ÿ   ÿ   ÿ   ÿ   ÿï
+
+
+’                  ±   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿÿ"""ÿ   ÿ±             ’   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ,,,ÿ]]]ÿÿ   ÿ   ’      I   í   ÿ   ÿÿ111ÿÿ   ÿ   ÿ%%%ÿ“““ÿ===ÿ   ÿ   ÿ   í   I   §   ÿ   ÿ   ÿ@@@ÿ½½½ÿÿ   ÿÿ¬¬¬ÿÿÿ   ÿ   ÿ   ÿ   §   ã   ÿ   ÿ   ÿCCCÿÄÄÄÿÿÿ‹‹‹ÿ¶¶¶ÿÿÿ   ÿ   ÿ   ÿ   ã   û   ÿ   ÿ   ÿCCCÿÄÄÄÿÿ___ÿÍÍÍÿ000ÿ$$$ÿÿ   ÿ   ÿ   ÿ   û   û   ÿ   ÿ   ÿCCCÿÂÂÂÿJJJÿÏÏÏÿRRRÿÿNNNÿ$$$ÿ   ÿ   ÿ   ÿ   û   ã   ÿ   ÿ   ÿAAAÿÙÙÙÿÍÍÍÿ{{{ÿÿÿvvvÿ666ÿ   ÿ   ÿ   ÿ   ã   §   ÿ   ÿ   ÿ===ÿîîîÿ£££ÿÿ   ÿÿ–––ÿEEEÿ   ÿ   ÿ   ÿ   §   I   í   ÿ   ÿÿ<<<ÿÿ   ÿ   ÿÿ,,,ÿÿ   ÿ   ÿ   í   I      ’   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ’             ±   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ±                     ’   ï   ÿ   ÿ   ÿ   ÿ   ÿ   ÿ   ï   ’                             I   ¨   ä   û   û   ä   ¨   I               ø  à  À  €  €                          €  €  À  à  ø  
+
+==========================================
+FICHIER : app/globals.css
+==========================================
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+
+==========================================
+FICHIER : app/layout.tsx
+==========================================
+import type { Metadata } from "next";
+import { Geist, Geist_Mono } from "next/font/google";
+import "./globals.css";
+
+const geistSans = Geist({
+  variable: "--font-geist-sans",
+  subsets: ["latin"],
+});
+
+const geistMono = Geist_Mono({
+  variable: "--font-geist-mono",
+  subsets: ["latin"],
+});
+
+export const metadata: Metadata = {
+  title: "Create Next App",
+  description: "Generated by create next app",
+};
+
+export default function RootLayout({ children }: LayoutProps<"/">) {
+  return (
+    <html
+      lang="en"
+      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+    >
+      <body className="min-h-full flex flex-col">{children}</body>
+    </html>
+  );
+}
+
+
+==========================================
+FICHIER : app/page.tsx
+==========================================
+ï»¿'use client';
+
+import React, { useEffect, useMemo, useState } from 'react';
+import { processUploadedFile, ProcessedUpload } from '@/lib/fileProcessor';
+import type { VehicleExtraction } from '@/lib/geminiExtractor';
+import type { EngineEvaluationResult, HingeStatus } from '@/lib/engineRules';
+import { buildFullReport, FullVehicleReport } from '@/lib/reportGenerator';
+
+const DEMO_SCENARIO: {
+  label: string;
+  notes: string;
+  mockExtraction: VehicleExtraction;
+} = {
+  label: 'DÃ©mo 1-clic : Peugeot 208 1.2 PureTech (06/2019 â€” 88 000 km)',
+  notes: 'Peugeot 208 1.2 PureTech 06/2019, 88 000 km, courroie Ã  prÃ©voir, CT vierge.',
+  mockExtraction: {
+    marque: 'Peugeot',
+    modele: '208',
+    motorisation_texte: '1.2 PureTech 110',
+    cnit: null,
+    vin: null,
+    mois_mec: 6,
+    annee_mec: 2019,
+    kilometrage_km: 88000,
+    norme_euro: 'EURO6',
+    releves_kilometrage: [
+      { source: 'ct', date: '2023-06-12', km: 62400 },
+      { source: 'ct', date: '2025-06-10', km: 84100 },
+    ],
+    entretien_mentions: [
+      {
+        element: 'courroie',
+        statut: 'a_prevoir',
+        detail: 'MentionnÃ© dans lâ€™annonce',
+      },
+    ],
+    defauts_utac: [],
+    confidence: {
+      motorisation: 'high',
+      cnit: 'high',
+      vin: 'high',
+      date_mec: 'high',
+      kilometrage: 'high',
+    },
+  },
+};
+
+function getHingeBadge(status: HingeStatus): { label: string; className: string } | null {
+  if (status === 'critical_before_fix') {
+    return {
+      label: 'Alerte millÃ©sime Ã  risque',
+      className: 'bg-red-950 text-red-300 border-red-700',
+    };
+  }
+  if (status === 'hinge_to_verify') {
+    return {
+      label: 'MillÃ©sime charniÃ¨re â€” vÃ©rifier rÃ©fÃ©rence piÃ¨ce',
+      className: 'bg-amber-950 text-amber-300 border-amber-700',
+    };
+  }
+  if (status === 'fixed_after_fix') {
+    return {
+      label: 'Version corrigÃ©e en usine',
+      className: 'bg-emerald-950 text-emerald-300 border-emerald-700',
+    };
+  }
+  return null;
+}
+
+export default function HomePage() {
+  const [loadingFile, setLoadingFile] = useState(false);
+  const [loadingAi, setLoadingAi] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<ProcessedUpload | null>(null);
+  const [extraNotes, setExtraNotes] = useState('');
+  const [extraction, setExtraction] = useState<VehicleExtraction | null>(null);
+  const [evaluation, setEvaluation] = useState<EngineEvaluationResult | null>(null);
+
+  const [manualMotor, setManualMotor] = useState('');
+  const [manualYear, setManualYear] = useState('');
+  const [manualMonth, setManualMonth] = useState('');
+  const [manualKm, setManualKm] = useState('');
+
+  const [includeCerfaBump, setIncludeCerfaBump] = useState(false);
+  const [waiverAccepted, setWaiverAccepted] = useState(false);
+  const [isUnlocked, setIsUnlocked] = useState(false);
+  const [restoredAccess, setRestoredAccess] = useState(false);
+  const [copiedKey, setCopiedKey] = useState<'seller' | 'rar' | 'magic' | null>(null);
+
+  const [hunterEmail, setHunterEmail] = useState('');
+  const [hunterVehicle, setHunterVehicle] = useState('');
+  const [loadingMagic, setLoadingMagic] = useState(false);
+  const [magicUrl, setMagicUrl] = useState<string | null>(null);
+  const [magicEmailSent, setMagicEmailSent] = useState(false);
+  const [magicEmailError, setMagicEmailError] = useState<string | null>(null);
+  const [restoredBanner, setRestoredBanner] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+
+    const mlToken = params.get('ml');
+    if (mlToken) {
+      fetch(`/api/magic-link?token=${encodeURIComponent(mlToken)}`)
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (data?.payload) {
+            const restoredText = data.payload.notes
+              ? `${data.payload.vehicleHint} â€” ${data.payload.notes}`
+              : data.payload.vehicleHint;
+            setExtraNotes(restoredText);
+            setHunterEmail(data.payload.email || '');
+            setHunterVehicle(data.payload.vehicleHint || '');
+
+            const hasPass = Boolean(data.payload.passUnlocked);
+            if (hasPass) {
+              setRestoredAccess(true);
+              setIsUnlocked(true);
+              setWaiverAccepted(true);
+              if (typeof data.payload.includeCerfa === 'boolean') {
+                setIncludeCerfaBump(data.payload.includeCerfa);
+              }
+            }
+
+            setRestoredBanner(
+              hasPass
+                ? `Dossier et accÃ¨s rapport dÃ©bloquÃ© repris via Magic Link pour ${data.payload.email} (${data.payload.vehicleHint}). Ajoute maintenant le PDF/photo du CT ou de lâ€™Histovec.`
+                : `Dossier repris via Magic Link pour ${data.payload.email} (${data.payload.vehicleHint}). Ajoute maintenant le PDF/photo du CT ou de lâ€™Histovec.`
+            );
+          }
+        })
+        .catch(() => {});
+    }
+  }, []);
+
+  const totalPrice = useMemo(() => {
+    const base = 19.9;
+    const bump = includeCerfaBump ? 9.9 : 0;
+    return (base + bump).toFixed(2).replace('.', ',');
+  }, [includeCerfaBump]);
+
+  const fullReport: FullVehicleReport | null = useMemo(() => {
+    if (!extraction || !evaluation) return null;
+    return buildFullReport(extraction, evaluation);
+  }, [extraction, evaluation]);
+
+  function syncManualInputs(ext: VehicleExtraction) {
+    setManualMotor(ext.motorisation_texte ?? '');
+    setManualYear(ext.annee_mec ? String(ext.annee_mec) : '');
+    setManualMonth(ext.mois_mec ? String(ext.mois_mec) : '');
+    setManualKm(typeof ext.kilometrage_km === 'number' ? String(ext.kilometrage_km) : '');
+  }
+
+  function resetAnalysisStates() {
+    setError(null);
+    setExtraction(null);
+    setEvaluation(null);
+    if (!restoredAccess) {
+      setIsUnlocked(false);
+    }
+    setCopiedKey(null);
+  }
+
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    resetAnalysisStates();
+    setResult(null);
+    setLoadingFile(true);
+
+    try {
+      const processed = await processUploadedFile(file);
+      setResult(processed);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'Erreur inconnue lors du traitement.';
+      setError(message);
+    } finally {
+      setLoadingFile(false);
+    }
+  }
+
+  async function runEvaluationOnExtraction(extractedVehicle: VehicleExtraction) {
+    const evalRes = await fetch('/api/evaluate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ extraction: extractedVehicle }),
+    });
+
+    const rawEvalText = await evalRes.text();
+    const evalData = rawEvalText ? JSON.parse(rawEvalText) : {};
+    if (!evalRes.ok) {
+      throw new Error(
+        evalData.error || `Erreur /api/evaluate (HTTP ${evalRes.status})`
+      );
+    }
+
+    setEvaluation(evalData.evaluation);
+  }
+
+  async function handleAnalyze() {
+    resetAnalysisStates();
+    setLoadingAi(true);
+
+    try {
+      const extractRes = await fetch('/api/extract', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imageDataUrl: result?.kind === 'image' ? result.imageDataUrl : undefined,
+          pdfText: result?.kind === 'pdf' ? result.pdfText : undefined,
+          extraNotes: extraNotes.trim() || undefined,
+        }),
+      });
+
+      const rawExtractText = await extractRes.text();
+      const extractData = rawExtractText ? JSON.parse(rawExtractText) : {};
+      if (!extractRes.ok) {
+        throw new Error(
+          extractData.error || `Erreur /api/extract (HTTP ${extractRes.status})`
+        );
+      }
+
+      const extractedVehicle: VehicleExtraction = extractData.extraction;
+      setExtraction(extractedVehicle);
+      syncManualInputs(extractedVehicle);
+      await runEvaluationOnExtraction(extractedVehicle);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Erreur rÃ©seau.';
+      setError(message);
+    } finally {
+      setLoadingAi(false);
+    }
+  }
+
+  async function handleApplyManualCorrection(e: React.FormEvent) {
+    e.preventDefault();
+    if (!extraction) return;
+
+    setError(null);
+    setLoadingAi(true);
+
+    try {
+      const updatedExtraction: VehicleExtraction = {
+        ...extraction,
+        motorisation_texte: manualMotor.trim() || extraction.motorisation_texte,
+        annee_mec: manualYear ? Number(manualYear) : extraction.annee_mec,
+        mois_mec: manualMonth ? Number(manualMonth) : extraction.mois_mec,
+        kilometrage_km: manualKm ? Number(manualKm) : extraction.kilometrage_km,
+        confidence: {
+          ...extraction.confidence,
+          motorisation: 'high',
+          cnit: 'high',
+          date_mec: 'high',
+          kilometrage: 'high',
+        },
+      };
+
+      setExtraction(updatedExtraction);
+      await runEvaluationOnExtraction(updatedExtraction);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Erreur lors du recalcul.';
+      setError(message);
+    } finally {
+      setLoadingAi(false);
+    }
+  }
+
+  async function handleRunDemo() {
+    resetAnalysisStates();
+    setResult(null);
+    setExtraNotes(DEMO_SCENARIO.notes);
+    setLoadingAi(true);
+
+    try {
+      setExtraction(DEMO_SCENARIO.mockExtraction);
+      syncManualInputs(DEMO_SCENARIO.mockExtraction);
+      await runEvaluationOnExtraction(DEMO_SCENARIO.mockExtraction);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Erreur lors de la dÃ©mo.';
+      setError(message);
+    } finally {
+      setLoadingAi(false);
+    }
+  }
+
+  async function handleGenerateMagicLink(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setMagicUrl(null);
+    setMagicEmailSent(false);
+    setMagicEmailError(null);
+    setLoadingMagic(true);
+
+    try {
+      const hint = hunterVehicle.trim() || extraNotes.trim();
+      const res = await fetch('/api/magic-link', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: hunterEmail.trim(),
+          vehicleHint: hint,
+          notes: extraNotes.trim() || undefined,
+          passUnlocked: isUnlocked || restoredAccess,
+          includeCerfa: includeCerfaBump,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Impossible de crÃ©er le Magic Link.');
+      }
+
+      setMagicUrl(data.magicUrl);
+      setMagicEmailSent(Boolean(data.emailSent));
+      setMagicEmailError(typeof data.emailError === 'string' ? data.emailError : null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Erreur rÃ©seau.';
+      setError(message);
+    } finally {
+      setLoadingMagic(false);
+    }
+  }
+
+  function handleLocalTestUnlock() {
+    if (!waiverAccepted) {
+      setError(
+        'Merci de cocher la case de renonciation au droit de rÃ©tractation (Art. L. 221-28 13Â°) pour dÃ©bloquer le rapport.'
+      );
+      return;
+    }
+
+    setError(null);
+    setIsUnlocked(true);
+  }
+
+  async function handleCopyText(text: string, key: 'seller' | 'rar' | 'magic') {
+    await navigator.clipboard.writeText(text);
+    setCopiedKey(key);
+    setTimeout(() => setCopiedKey(null), 2000);
+  }
+
+  const verdictBadgeClass =
+    evaluation?.verdict === 'RISQUE_ELEVE'
+      ? 'bg-red-950 text-red-300 border-red-700'
+      : evaluation?.verdict === 'VIGILANCE'
+        ? 'bg-amber-950 text-amber-300 border-amber-700'
+        : 'bg-emerald-950 text-emerald-300 border-emerald-700';
+
+  const hingeBadge = evaluation?.matchedEngine
+    ? getHingeBadge(evaluation.matchedEngine.hingeStatus)
+    : null;
+
+  return (
+    <main className="min-h-screen bg-slate-950 text-slate-100 p-4 sm:p-6 flex flex-col items-center justify-center">
+      <div className="w-full max-w-2xl rounded-2xl border border-slate-800 bg-slate-900 p-5 sm:p-6 space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <h1 className="text-xl font-bold">Scanner Auto</h1>
+            <p className="text-sm text-slate-400 mt-0.5">
+              Importe un document/photo ou colle une annonce pour estimer les risques et rÃ©parations.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handleRunDemo}
+            disabled={loadingFile || loadingAi}
+            className="shrink-0 rounded-xl border border-slate-700 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 px-3.5 py-2 text-xs font-semibold text-emerald-300 transition cursor-pointer"
+          >
+            DÃ©mo 1-clic
+          </button>
+        </div>
+
+        {restoredBanner && (
+          <div className="rounded-xl bg-emerald-950/50 border border-emerald-700/60 p-3 text-xs text-emerald-200">
+            {restoredBanner}
+          </div>
+        )}
+
+        <label className="block cursor-pointer rounded-xl border border-dashed border-slate-600 hover:border-emerald-400 transition p-5 text-center">
+          <span className="text-sm font-medium text-emerald-400">
+            Choisir un fichier (Image, HEIC, PDF)
+          </span>
+          <p className="text-xs text-slate-400 mt-1">
+            Carte grise, rapport Histovec, contrÃ´le technique ou photo
+          </p>
+          <input
+            type="file"
+            accept="image/*,.heic,.heif,application/pdf,.pdf"
+            onChange={handleFileChange}
+            className="hidden"
+          />
+        </label>
+
+        <div>
+          <label className="block text-xs text-slate-400 mb-1">
+            Texte dâ€™annonce / notes (optionnel)
+          </label>
+          <textarea
+            rows={3}
+            value={extraNotes}
+            onChange={(e) => setExtraNotes(e.target.value)}
+            placeholder="Ex. Peugeot 208 1.2 PureTech 06/2019, 88 000 km, courroie Ã  prÃ©voir..."
+            className="w-full rounded-xl bg-slate-950 border border-slate-800 p-3 text-sm text-slate-100 focus:outline-none focus:border-emerald-400"
+          />
+        </div>
+
+        <button
+          type="button"
+          onClick={handleAnalyze}
+          disabled={loadingFile || loadingAi || (!result && !extraNotes.trim())}
+          className="w-full rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 text-slate-950 font-semibold py-2.5 text-sm transition cursor-pointer"
+        >
+          {loadingAi ? 'Analyse IA + Moteur en cours...' : 'Analyser le vÃ©hicule'}
+        </button>
+
+        {loadingFile && (
+          <p className="text-sm text-amber-300">Traitement du fichier en cours...</p>
+        )}
+
+        {error && (
+          <div className="rounded-lg bg-red-950/60 border border-red-700 p-3 text-sm text-red-200 break-words">
+            {error}
+          </div>
+        )}
+
+        {result && (
+          <div className="rounded-xl bg-slate-950 border border-slate-800 p-4 space-y-2 text-sm">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-slate-400">Fichier :</span>
+              <span className="font-mono text-xs sm:text-sm truncate">
+                {result.fileName} ({result.sizeKb} Ko)
+              </span>
+            </div>
+            {result.kind === 'pdf' && (
+              <p className="text-xs text-slate-400">
+                PDF analysÃ© : {result.pdfPageCount ?? 1} page(s)
+              </p>
+            )}
+          </div>
+        )}
+
+        {evaluation && (
+          <div className="rounded-xl bg-slate-950 border border-slate-800 p-4 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span
+                className={`px-3 py-1 rounded-full border text-xs font-bold ${verdictBadgeClass}`}
+              >
+                {evaluation.verdict}
+              </span>
+              <span className="text-sm font-mono text-slate-300 whitespace-nowrap">
+                Score de risque : <strong>{evaluation.scoreRisque} / 100</strong>
+              </span>
+            </div>
+
+            {evaluation.postOcrValidation.needsManualConfirmation && (
+              <form
+                onSubmit={handleApplyManualCorrection}
+                className="rounded-xl bg-amber-950/40 border border-amber-600/60 p-4 space-y-3"
+              >
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wider text-amber-300">
+                    VÃ©rification manuelle recommandÃ©e (Garde-fou OCR)
+                  </p>
+                  {evaluation.postOcrValidation.anomalieDetail && (
+                    <p className="text-xs text-red-200 mt-1">
+                      {evaluation.postOcrValidation.anomalieDetail}
+                    </p>
+                  )}
+                  {evaluation.postOcrValidation.lowConfidenceFields.length > 0 && (
+                    <p className="text-xs text-amber-200 mt-1">
+                      Champs Ã  lisibilitÃ© faible :{' '}
+                      <strong>
+                        {evaluation.postOcrValidation.lowConfidenceFields.join(', ')}
+                      </strong>
+                      . Confirme ou corrige les valeurs ci-dessous :
+                    </p>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <input
+                    type="text"
+                    value={manualMotor}
+                    onChange={(e) => setManualMotor(e.target.value)}
+                    placeholder="Motorisation (ex. 1.2 PureTech 110)"
+                    className="rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-xs text-slate-100"
+                  />
+                  <input
+                    type="number"
+                    value={manualKm}
+                    onChange={(e) => setManualKm(e.target.value)}
+                    placeholder="KilomÃ©trage exact (km)"
+                    className="rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-xs text-slate-100"
+                  />
+                  <input
+                    type="number"
+                    min={1}
+                    max={12}
+                    value={manualMonth}
+                    onChange={(e) => setManualMonth(e.target.value)}
+                    placeholder="Mois MEC (1-12)"
+                    className="rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-xs text-slate-100"
+                  />
+                  <input
+                    type="number"
+                    min={1980}
+                    max={2030}
+                    value={manualYear}
+                    onChange={(e) => setManualYear(e.target.value)}
+                    placeholder="AnnÃ©e MEC (ex. 2019)"
+                    className="rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 text-xs text-slate-100"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={loadingAi}
+                  className="w-full rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 font-semibold py-2 text-xs transition cursor-pointer"
+                >
+                  Recalculer avec mes valeurs vÃ©rifiÃ©es
+                </button>
+              </form>
+            )}
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+              <div className="rounded-lg bg-slate-900 p-3 border border-slate-800">
+                <p className="text-xs text-slate-400">Estimation rÃ©parations</p>
+                <p className="mt-1 font-semibold">
+                  IndÃ©pendant : {evaluation.estimatedRepairCost.independant} â‚¬
+                </p>
+                <p className="text-xs text-slate-300">
+                  Concession : {evaluation.estimatedRepairCost.concession} â‚¬
+                </p>
+              </div>
+
+              <div className="rounded-lg bg-slate-900 p-3 border border-slate-800">
+                <p className="text-xs text-slate-400">Vignette Critâ€™Air</p>
+                <p className="mt-1 font-semibold">{evaluation.critAir.vignette}</p>
+                <p className="text-xs text-slate-400">Source : {evaluation.critAir.source}</p>
+              </div>
+            </div>
+
+            {evaluation.matchedEngine && (
+              <div className="rounded-lg bg-slate-900 p-3 border border-slate-800 text-xs space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="text-slate-400">Motorisation identifiÃ©e :</p>
+                    <p className="font-semibold text-slate-100">{evaluation.matchedEngine.label}</p>
+                  </div>
+                  {hingeBadge && (
+                    <span
+                      className={`px-2.5 py-1 rounded-full border text-[11px] font-semibold ${hingeBadge.className}`}
+                    >
+                      {hingeBadge.label}
+                    </span>
+                  )}
+                </div>
+                {evaluation.matchedEngine.hingeNote && (
+                  <p className="text-amber-300">{evaluation.matchedEngine.hingeNote}</p>
+                )}
+              </div>
+            )}
+
+            {evaluation.mileageCheck.note && (
+              <div className="rounded-lg bg-slate-900 p-3 border border-slate-800 text-xs">
+                <p className="text-slate-400">CohÃ©rence kilomÃ©trique :</p>
+                <p className="text-slate-200 mt-0.5">{evaluation.mileageCheck.note}</p>
+              </div>
+            )}
+
+            {evaluation.alerts.length > 0 && (
+              <div className="space-y-1">
+                <p className="text-xs font-semibold text-amber-300">Points dâ€™attention :</p>
+                <ul className="list-disc list-inside text-xs text-slate-200 space-y-1">
+                  {evaluation.alerts.map((alert, idx) => (
+                    <li key={idx}>{alert}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {!isUnlocked && fullReport && (
+              <div className="rounded-xl bg-slate-900 border border-emerald-700/50 p-4 space-y-3">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-sm font-bold text-emerald-300">
+                      Pass 30 jours â€” Rapport complet & NÃ©gociation
+                    </p>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Inclut la check-list dâ€™inspection, la marge de nÃ©gociation et le message vendeur prÃªt Ã  envoyer.
+                    </p>
+                  </div>
+                  <span className="text-lg font-bold text-white whitespace-nowrap shrink-0">
+                    {totalPrice} â‚¬
+                  </span>
+                </div>
+
+                <label className="flex items-start gap-2.5 text-xs text-slate-200 bg-slate-950 p-3 rounded-lg border border-slate-800 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={includeCerfaBump}
+                    onChange={(e) => setIncludeCerfaBump(e.target.checked)}
+                    className="mt-0.5 accent-emerald-500 shrink-0"
+                  />
+                  <span>
+                    <strong>Option (+9,90 â‚¬) :</strong> Pack dÃ©marches & recours (guide Cerfa + trame courrier recommandÃ© RAR).
+                  </span>
+                </label>
+
+                <label className="flex items-start gap-2.5 text-xs text-slate-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={waiverAccepted}
+                    onChange={(e) => setWaiverAccepted(e.target.checked)}
+                    className="mt-0.5 accent-emerald-500 shrink-0"
+                  />
+                  <span>{fullReport.legalDisclaimers.withdrawalWaiverText}</span>
+                </label>
+
+                <button
+                  type="button"
+                  onClick={handleLocalTestUnlock}
+                  className="w-full rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold py-2.5 text-sm transition cursor-pointer"
+                >
+                  DÃ©bloquer le rapport complet ({totalPrice} â‚¬ â€” mode test)
+                </button>
+              </div>
+            )}
+
+            {isUnlocked && fullReport && (
+              <div className="rounded-xl bg-slate-900 border border-emerald-600/60 p-4 space-y-4 text-sm">
+                <div>
+                  <p className="text-xs uppercase tracking-wider text-emerald-400 font-semibold">
+                    Rapport dÃ©taillÃ© dÃ©bloquÃ©
+                    {includeCerfaBump ? ' + Pack Cerfa / RAR' : ''}
+                  </p>
+                  <p className="font-semibold mt-1">{fullReport.vehicleTitle}</p>
+                  <p className="text-xs text-slate-300 mt-1">{fullReport.executiveSummary}</p>
+                </div>
+
+                <div className="rounded-lg bg-slate-950 p-3 border border-slate-800 space-y-1">
+                  <p className="text-xs font-semibold text-emerald-400">StratÃ©gie de nÃ©gociation</p>
+                  <p className="text-xs text-slate-200">
+                    {fullReport.negotiationAdvice.argumentSummary}
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <p className="text-xs font-semibold text-slate-200">
+                    Check-list avant dÃ©placement & essai
+                  </p>
+                  <ul className="list-disc list-inside text-xs text-slate-300 space-y-1">
+                    {fullReport.inspectionChecklist.map((item, idx) => (
+                      <li key={idx}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs font-semibold text-emerald-400">
+                      Message prÃªt Ã  envoyer au vendeur
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => handleCopyText(fullReport.sellerMessageScript, 'seller')}
+                      className="text-xs px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-100 cursor-pointer shrink-0"
+                    >
+                      {copiedKey === 'seller' ? 'CopiÃ© !' : 'Copier'}
+                    </button>
+                  </div>
+                  <pre className="rounded-lg bg-slate-950 border border-slate-800 p-3 text-xs text-slate-200 whitespace-pre-wrap">
+                    {fullReport.sellerMessageScript}
+                  </pre>
+                </div>
+
+                {includeCerfaBump && (
+                  <div className="rounded-xl bg-slate-950 border border-amber-600/50 p-4 space-y-3">
+                    <p className="text-xs font-bold uppercase tracking-wider text-amber-300">
+                      Pack Cerfa & Recours (RAR)
+                    </p>
+
+                    <div className="space-y-1.5">
+                      <p className="text-xs font-semibold text-slate-200">
+                        DÃ©marches cession (Cerfa 15776*02) & immatriculation
+                      </p>
+                      <ul className="list-disc list-inside text-xs text-slate-300 space-y-1">
+                        {fullReport.cerfaAndLitigationPack.cessionAndRegistrationSteps.map(
+                          (step, idx) => (
+                            <li key={idx}>{step}</li>
+                          )
+                        )}
+                      </ul>
+                    </div>
+
+                    <div className="space-y-2 pt-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-xs font-semibold text-amber-300">
+                          Trame courrier recommandÃ© (RAR â€” Litige / Vice cachÃ©)
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleCopyText(
+                              fullReport.cerfaAndLitigationPack.registeredMailTemplate,
+                              'rar'
+                            )
+                          }
+                          className="text-xs px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-100 cursor-pointer shrink-0"
+                        >
+                          {copiedKey === 'rar' ? 'CopiÃ© !' : 'Copier la trame'}
+                        </button>
+                      </div>
+                      <pre className="rounded-lg bg-slate-900 border border-slate-800 p-3 text-xs text-slate-200 whitespace-pre-wrap max-h-64 overflow-auto">
+                        {fullReport.cerfaAndLitigationPack.registeredMailTemplate}
+                      </pre>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        <form
+          onSubmit={handleGenerateMagicLink}
+          className="rounded-xl bg-slate-950 border border-slate-800 p-4 space-y-3"
+        >
+          <div>
+            <p className="text-xs font-bold uppercase tracking-wider text-emerald-400">
+              Chasseur de CT â€” Revenir quand le vendeur rÃ©pond
+            </p>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Pas encore le rapport Histovec ou le CT ? GÃ©nÃ¨re un lien de reprise pour rouvrir ce dossier dÃ¨s rÃ©ception.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <input
+              type="email"
+              value={hunterEmail}
+              onChange={(e) => setHunterEmail(e.target.value)}
+              placeholder="ton.email@exemple.fr"
+              className="rounded-lg bg-slate-900 border border-slate-800 px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-emerald-400"
+            />
+            <input
+              type="text"
+              value={hunterVehicle}
+              onChange={(e) => setHunterVehicle(e.target.value)}
+              placeholder="VÃ©hicule visÃ© (ex. Clio 4 0.9 TCe 2018)"
+              className="rounded-lg bg-slate-900 border border-slate-800 px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-emerald-400"
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={loadingMagic}
+            className="w-full rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 py-2 text-xs font-semibold text-emerald-300 transition cursor-pointer"
+          >
+            {loadingMagic ? 'CrÃ©ation du lien...' : 'CrÃ©er mon Magic Link de reprise'}
+          </button>
+
+          {magicUrl && (
+            <div className="rounded-lg bg-slate-900 border border-emerald-700/50 p-3 space-y-2 text-xs">
+              {magicEmailSent ? (
+                <p className="text-emerald-300 font-semibold">
+                  Email envoyÃ© Ã  {hunterEmail} avec ton Magic Link.
+                </p>
+              ) : (
+                <p className="text-emerald-300 font-semibold">Magic Link prÃªt :</p>
+              )}
+              {magicEmailError && (
+                <p className="text-amber-300">
+                  Envoi email non effectuÃ© ({magicEmailError}). Tu peux utiliser le lien direct ci-dessous :
+                </p>
+              )}
+              <p className="font-mono break-all text-slate-200">{magicUrl}</p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleCopyText(magicUrl, 'magic')}
+                  className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-100 cursor-pointer"
+                >
+                  {copiedKey === 'magic' ? 'Lien copiÃ© !' : 'Copier le lien'}
+                </button>
+                <a
+                  href={magicUrl}
+                  className="px-2.5 py-1 rounded bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold"
+                >
+                  Tester lâ€™ouverture du lien
+                </a>
+              </div>
+            </div>
+          )}
+        </form>
+
+        {extraction && (
+          <details className="rounded-xl bg-slate-950 border border-slate-800 p-3">
+            <summary className="text-xs font-semibold text-slate-400 cursor-pointer">
+              Voir le JSON extrait par Gemini
+            </summary>
+            <pre className="mt-2 max-h-72 overflow-auto rounded bg-slate-900 p-3 text-xs text-slate-200">
+              {JSON.stringify(extraction, null, 2)}
+            </pre>
+          </details>
+        )}
+
+        <footer className="pt-2 border-t border-slate-800 text-[11px] text-slate-400">
+          {fullReport?.legalDisclaimers.notAnExpertNotice ??
+            'Outil dâ€™aide Ã  la dÃ©cision basÃ© sur lâ€™analyse automatisÃ©e de donnÃ©es et documents fournis. Ne constitue pas une expertise automobile au sens de lâ€™article L. 326-1 du Code de la route.'}
+        </footer>
+      </div>
+    </main>
+  );
+}
+
+==========================================
+FICHIER : eslint.config.mjs
+==========================================
+import { defineConfig, globalIgnores } from "eslint/config";
+import nextVitals from "eslint-config-next/core-web-vitals";
+import nextTs from "eslint-config-next/typescript";
+
+const eslintConfig = defineConfig([
+  ...nextVitals,
+  ...nextTs,
+  // Override default ignores of eslint-config-next.
+  globalIgnores([
+    // Default ignores of eslint-config-next:
+    ".next/**",
+    "out/**",
+    "build/**",
+    "next-env.d.ts",
+  ]),
+]);
+
+export default eslintConfig;
+
+
+==========================================
+FICHIER : lib/engineRules.ts
+==========================================
+import type {
+  MaintenanceMention,
+  MileageReading,
+  UtacDefect,
+  VehicleExtraction,
+} from './geminiExtractor';
+
+export type OrganGroup =
+  | 'distribution'
+  | 'injection'
+  | 'depollution'
+  | 'transmission'
+  | 'liaison_sol'
+  | 'autre';
+
+export type HingeStatus =
+  | 'none'
+  | 'critical_before_fix'
+  | 'hinge_to_verify'
+  | 'fixed_after_fix';
+
+export interface MileageConsistencyResult {
+  status: 'coherent' | 'suspicious_low' | 'high_mileage' | 'unknown';
+  expectedAnnualKm: number | null;
+  observedAnnualKm: number | null;
+  note: string | null;
+}
+
+export interface PostOcrValidationResult {
+  anomalieCompteurOuOcr: boolean;
+  anomalieDetail: string | null;
+  lowConfidenceFields: string[];
+  cnitFallbackToManualEngine: boolean;
+  needsManualConfirmation: boolean;
+}
+
+export interface EngineRule {
+  id: string;
+  label: string;
+  organGroup: OrganGroup;
+  matchKeywords: RegExp;
+  excludeHybrid?: boolean;
+  cnitPrefixes?: string[];
+  fixYear: number;
+  fixMonth: number;
+  riskTitle: string;
+  riskSummary: string;
+  costIndep: number;
+  costDealer: number;
+  relatedElements: MaintenanceMention['element'][];
+}
+
+export interface EngineEvaluationResult {
+  matchedEngine: {
+    id: string;
+    label: string;
+    hingeStatus: HingeStatus;
+    hingeNote: string | null;
+  } | null;
+  mileageCheck: MileageConsistencyResult;
+  postOcrValidation: PostOcrValidationResult;
+  scoreRisque: number;
+  verdict: 'FAVORABLE' | 'VIGILANCE' | 'RISQUE_ELEVE';
+  estimatedRepairCost: {
+    independant: number;
+    concession: number;
+  };
+  critAir: {
+    vignette:
+      | 'Critâ€™Air 0'
+      | 'Critâ€™Air 1'
+      | 'Critâ€™Air 2'
+      | 'Critâ€™Air 3'
+      | 'Critâ€™Air 4'
+      | 'Critâ€™Air 5'
+      | 'Non classÃ© / Inconnu';
+    source: 'norme_euro_v9' | 'estimation_annee' | 'inconnu';
+  };
+  alerts: string[];
+  sellerQuestions: string[];
+}
+
+export const ENGINE_RULES: EngineRule[] = [
+  {
+    id: 'psa_1_2_puretech_eb2',
+    label: '1.2 PureTech (EB2) â€” Courroie humide',
+    organGroup: 'distribution',
+    matchKeywords: /puretech|1\.2\s*eb2|110|130\s*ch/i,
+    excludeHybrid: true,
+    cnitPrefixes: ['M10PGTVP'],
+    fixYear: 2023,
+    fixMonth: 3,
+    riskTitle: 'DÃ©gradation courroie de distribution dans lâ€™huile & encrassement crÃ©pine',
+    riskSummary:
+      'La courroie immergÃ©e peut se dÃ©grader prÃ©maturÃ©ment, boucher la crÃ©pine de pompe Ã  huile et provoquer une casse moteur ou une baisse de pression dâ€™huile.',
+    costIndep: 950,
+    costDealer: 1450,
+    relatedElements: ['distribution', 'courroie', 'crepine'],
+  },
+  {
+    id: 'psa_1_5_bluehdi_dv5',
+    label: '1.5 BlueHDi (DV5) â€” ChaÃ®ne dâ€™arbres Ã  cames (7mm vs 8mm)',
+    organGroup: 'distribution',
+    matchKeywords: /bluehdi|1\.5\s*hdi|dv5|100\s*ch|130\s*ch\s*diesel/i,
+    cnitPrefixes: ['M10PGTVD', 'M10PGTVL'],
+    fixYear: 2023,
+    fixMonth: 2,
+    riskTitle: 'Usure prÃ©maturÃ©e de la chaÃ®ne dâ€™arbres Ã  cames (7 mm) / tendeur',
+    riskSummary:
+      'Sur les millÃ©simes avant modification, la chaÃ®ne de liaison entre arbres Ã  cames peut sâ€™allonger ou casser, entraÃ®nant des dÃ©gÃ¢ts culasse importants.',
+    costIndep: 1150,
+    costDealer: 1750,
+    relatedElements: ['distribution', 'chaine'],
+  },
+  {
+    id: 'psa_1_6_thp_ep6',
+    label: '1.6 THP / PureTech 180+ (EP6) â€” ChaÃ®ne & encrassement',
+    organGroup: 'distribution',
+    matchKeywords: /\bthp\b|\bep6\b|1\.6\s*(thp|vti)/i,
+    cnitPrefixes: ['M10PGTTH', 'M10PGTEP'],
+    fixYear: 2016,
+    fixMonth: 6,
+    riskTitle: 'Allongement chaÃ®ne de distribution / tendeur & calamine admission',
+    riskSummary:
+      'Le tendeur de chaÃ®ne et lâ€™encrassement de lâ€™admission directe sont Ã  surveiller particuliÃ¨rement si lâ€™entretien nâ€™a pas Ã©tÃ© rapprochÃ©.',
+    costIndep: 900,
+    costDealer: 1400,
+    relatedElements: ['distribution', 'chaine', 'turbo'],
+  },
+  {
+    id: 'renault_1_2_tce_h5ft',
+    label: '1.2 TCe (H5Ft) â€” Consommation dâ€™huile & chaÃ®ne',
+    organGroup: 'injection',
+    matchKeywords: /1\.2\s*tce|h5ft|tce\s*(115|120|125|130)/i,
+    cnitPrefixes: ['M10RNTCE', 'M10RNH5F'],
+    fixYear: 2016,
+    fixMonth: 7,
+    riskTitle: 'Surconsommation dâ€™huile moteur & usure chaÃ®ne de distribution',
+    riskSummary:
+      'Les blocs 1.2 TCe antÃ©rieurs Ã  la fiabilisation nÃ©cessitent une vigilance accrue sur la consommation dâ€™huile, les niveaux et la distribution.',
+    costIndep: 1200,
+    costDealer: 1850,
+    relatedElements: ['chaine', 'turbo', 'autre'],
+  },
+  {
+    id: 'renault_1_5_dci_k9k',
+    label: '1.5 dCi (K9K) â€” Injection / coussinets / FAP',
+    organGroup: 'injection',
+    matchKeywords: /1\.5\s*dci|dci\s*(75|90|95|110|115)|k9k/i,
+    cnitPrefixes: ['M10RNDCI', 'M10RNK9K'],
+    fixYear: 2012,
+    fixMonth: 1,
+    riskTitle: 'ContrÃ´le circuit dâ€™injection, FAP et pÃ©riodicitÃ© de distribution',
+    riskSummary:
+      'VÃ©rifier la rÃ©gularitÃ© des vidanges et le remplacement de la courroie de distribution selon lâ€™Ã¢ge et le kilomÃ©trage.',
+    costIndep: 750,
+    costDealer: 1150,
+    relatedElements: ['courroie', 'distribution', 'injecteur'],
+  },
+  {
+    id: 'vag_tdi_ea189_ea288',
+    label: '1.6 / 2.0 TDI (EA189 / EA288) â€” EGR / FAP / Pompe Ã  eau',
+    organGroup: 'depollution',
+    matchKeywords: /(1\.6|2\.0)\s*tdi|ea189|ea288/i,
+    cnitPrefixes: ['M10VWTDI', 'M10VWEA2'],
+    fixYear: 2016,
+    fixMonth: 1,
+    riskTitle: 'Encrassement vanne EGR / FAP et contrÃ´le kit distribution + pompe Ã  eau',
+    riskSummary:
+      'Sur les trajets courts ou urbains, la vanne EGR et le FAP peuvent sâ€™encrasser ; vÃ©rifier Ã©galement lâ€™Ã©chÃ©ance distribution/pompe Ã  eau.',
+    costIndep: 800,
+    costDealer: 1250,
+    relatedElements: ['courroie', 'distribution', 'adblue'],
+  },
+  {
+    id: 'adblue_scr_generic',
+    label: 'SystÃ¨me antipollution SCR / AdBlue',
+    organGroup: 'depollution',
+    matchKeywords: /bluehdi|tdi|dci|hdi|diesel/i,
+    fixYear: 2024,
+    fixMonth: 12,
+    riskTitle: 'DÃ©faillance injecteur / rÃ©servoir / pompe AdBlue',
+    riskSummary:
+      'Les cristallisations dâ€™urÃ©e ou pannes de module AdBlue peuvent entraÃ®ner un message dâ€™anti-dÃ©marrage.',
+    costIndep: 850,
+    costDealer: 1350,
+    relatedElements: ['adblue'],
+  },
+];
+
+function isHybridText(text: string): boolean {
+  return /\b(hybrid|mhev|phev|hybride|e-dcs6|136)\b/i.test(text);
+}
+
+function parseReadingDateToTimestamp(rawDate: string | null): number | null {
+  if (!rawDate) return null;
+  const trimmed = rawDate.trim();
+
+  // YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    const ts = Date.parse(trimmed);
+    return Number.isNaN(ts) ? null : ts;
+  }
+
+  // YYYY-MM
+  if (/^\d{4}-\d{2}$/.test(trimmed)) {
+    const ts = Date.parse(`${trimmed}-01`);
+    return Number.isNaN(ts) ? null : ts;
+  }
+
+  // DD/MM/YYYY
+  const dmy = trimmed.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (dmy) {
+    const ts = Date.parse(`${dmy[3]}-${dmy[2]}-${dmy[1]}`);
+    return Number.isNaN(ts) ? null : ts;
+  }
+
+  // MM/YYYY
+  const my = trimmed.match(/^(\d{2})\/(\d{4})$/);
+  if (my) {
+    const ts = Date.parse(`${my[2]}-${my[1]}-01`);
+    return Number.isNaN(ts) ? null : ts;
+  }
+
+  // YYYY
+  if (/^\d{4}$/.test(trimmed)) {
+    const ts = Date.parse(`${trimmed}-06-01`);
+    return Number.isNaN(ts) ? null : ts;
+  }
+
+  return null;
+}
+
+export function validatePostOcr(extraction: VehicleExtraction): PostOcrValidationResult {
+  const readings: MileageReading[] = Array.isArray(extraction.releves_kilometrage)
+    ? extraction.releves_kilometrage
+    : [];
+
+  const datedReadings = readings
+    .map((r) => ({
+      ...r,
+      ts: parseReadingDateToTimestamp(r.date),
+    }))
+    .filter((r): r is MileageReading & { ts: number } => r.ts !== null && typeof r.km === 'number')
+    .sort((a, b) => a.ts - b.ts);
+
+  let anomalieCompteurOuOcr = false;
+  let anomalieDetail: string | null = null;
+
+  for (let i = 1; i < datedReadings.length; i++) {
+    const prev = datedReadings[i - 1];
+    const curr = datedReadings[i];
+    if (curr.km < prev.km) {
+      anomalieCompteurOuOcr = true;
+      anomalieDetail = `ANOMALIE_COMPTEUR_OU_OCR : baisse de kilomÃ©trage dÃ©tectÃ©e (${prev.km.toLocaleString(
+        'fr-FR'
+      )} km le ${prev.date} [${prev.source}] -> ${curr.km.toLocaleString(
+        'fr-FR'
+      )} km le ${curr.date} [${curr.source}]). VÃ©rification visuelle indispensable.`;
+      break;
+    }
+  }
+
+  if (
+    !anomalieCompteurOuOcr &&
+    datedReadings.length > 0 &&
+    typeof extraction.kilometrage_km === 'number'
+  ) {
+    const latest = datedReadings[datedReadings.length - 1];
+    if (extraction.kilometrage_km < latest.km) {
+      anomalieCompteurOuOcr = true;
+      anomalieDetail = `ANOMALIE_COMPTEUR_OU_OCR : le kilomÃ©trage actuel dÃ©clarÃ© (${extraction.kilometrage_km.toLocaleString(
+        'fr-FR'
+      )} km) est infÃ©rieur au relevÃ© du ${latest.date} (${latest.km.toLocaleString(
+        'fr-FR'
+      )} km, ${latest.source}).`;
+    }
+  }
+
+  const lowConfidenceFields: string[] = [];
+  const conf = extraction.confidence;
+  if (conf?.motorisation === 'low') lowConfidenceFields.push('motorisation');
+  if (conf?.date_mec === 'low') lowConfidenceFields.push('date_mec');
+  if (conf?.kilometrage === 'low') lowConfidenceFields.push('kilometrage');
+
+  const cnitFallbackToManualEngine = Boolean(extraction.cnit && conf?.cnit === 'low');
+  if (cnitFallbackToManualEngine) {
+    lowConfidenceFields.push('cnit');
+  }
+
+  const needsManualConfirmation = anomalieCompteurOuOcr || lowConfidenceFields.length > 0;
+
+  return {
+    anomalieCompteurOuOcr,
+    anomalieDetail,
+    lowConfidenceFields,
+    cnitFallbackToManualEngine,
+    needsManualConfirmation,
+  };
+}
+
+function evaluateHingeStatus(
+  rule: EngineRule,
+  anneeMec: number | null,
+  moisMec: number | null
+): { status: HingeStatus; note: string | null } {
+  if (!anneeMec) {
+    return { status: 'none', note: null };
+  }
+
+  if (anneeMec < rule.fixYear) {
+    return { status: 'critical_before_fix', note: null };
+  }
+
+  if (anneeMec === rule.fixYear) {
+    const month = moisMec ?? 6;
+    if (month < rule.fixMonth) {
+      return { status: 'critical_before_fix', note: null };
+    }
+    if (month <= Math.min(12, rule.fixMonth + 3)) {
+      return {
+        status: 'hinge_to_verify',
+        note: `MillÃ©sime charniÃ¨re (${month}/${anneeMec}) : vÃ©rifier le code moteur / la rÃ©fÃ©rence piÃ¨ce sur facture ou certificat.`,
+      };
+    }
+    return {
+      status: 'fixed_after_fix',
+      note: `ImmatriculÃ© aprÃ¨s la pÃ©riode charniÃ¨re (${month}/${anneeMec}) : version corrigÃ©e en usine (Ã  confirmer sur facture).`,
+    };
+  }
+
+  return { status: 'fixed_after_fix', note: null };
+}
+
+export function evaluateMileageConsistency(
+  extraction: VehicleExtraction
+): MileageConsistencyResult {
+  const km = extraction.kilometrage_km;
+  const year = extraction.annee_mec;
+
+  if (typeof km !== 'number' || km <= 0 || !year) {
+    return {
+      status: 'unknown',
+      expectedAnnualKm: null,
+      observedAnnualKm: null,
+      note: null,
+    };
+  }
+
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth() + 1;
+  const monthMec = extraction.mois_mec ?? 6;
+
+  const ageMonths = Math.max(1, (currentYear - year) * 12 + (currentMonth - monthMec));
+  const ageYears = ageMonths / 12;
+  const observedAnnualKm = Math.round(km / ageYears);
+  const expectedAnnualKm = 13500;
+
+  if (ageYears >= 4 && observedAnnualKm < 4000) {
+    return {
+      status: 'suspicious_low',
+      expectedAnnualKm,
+      observedAnnualKm,
+      note: `KilomÃ©trage faible pour lâ€™Ã¢ge (${km.toLocaleString(
+        'fr-FR'
+      )} km sur ~${ageYears.toFixed(1)} ans, soit ~${observedAnnualKm.toLocaleString(
+        'fr-FR'
+      )} km/an) : vÃ©rifier la cohÃ©rence avec les rapports Histovec et CT.`,
+    };
+  }
+
+  if (km >= 160000 || observedAnnualKm >= 28000) {
+    return {
+      status: 'high_mileage',
+      expectedAnnualKm,
+      observedAnnualKm,
+      note: `KilomÃ©trage Ã©levÃ© (${km.toLocaleString(
+        'fr-FR'
+      )} km, ~${observedAnnualKm.toLocaleString(
+        'fr-FR'
+      )} km/an) : anticiper lâ€™usure des piÃ¨ces dâ€™usure (embrayage, amortisseurs, freins, turbo/FAP).`,
+    };
+  }
+
+  return {
+    status: 'coherent',
+    expectedAnnualKm,
+    observedAnnualKm,
+    note: null,
+  };
+}
+
+function hasPositiveMaintenanceProof(
+  mentions: MaintenanceMention[],
+  elements: MaintenanceMention['element'][]
+): {
+  hasInvoiceProof: boolean;
+  hasDeclaredProof: boolean;
+  hasToDo: boolean;
+  hasDefect: boolean;
+} {
+  const relevant = mentions.filter((m) => elements.includes(m.element));
+  return {
+    hasInvoiceProof: relevant.some((m) => m.statut === 'fait_avec_facture'),
+    hasDeclaredProof: relevant.some((m) => m.statut === 'fait_declare'),
+    hasToDo: relevant.some((m) => m.statut === 'a_prevoir'),
+    hasDefect: relevant.some((m) => m.statut === 'defaut_signale'),
+  };
+}
+
+function mapUtacDefectToOrganAndCost(defect: UtacDefect): {
+  organGroup: OrganGroup;
+  costIndep: number;
+  costDealer: number;
+} {
+  const txt = `${defect.code ?? ''} ${defect.libelle}`.toLowerCase();
+
+  let organGroup: OrganGroup = 'autre';
+  let baseIndep =
+    defect.gravite === 'critique' ? 650 : defect.gravite === 'majeure' ? 350 : 120;
+  let baseDealer =
+    defect.gravite === 'critique' ? 950 : defect.gravite === 'majeure' ? 550 : 180;
+
+  if (/courroie|distribution|cha[iÃ®]ne|fuite.*huile|moteur/i.test(txt)) {
+    organGroup = 'distribution';
+    baseIndep = defect.gravite === 'mineure' ? 250 : 900;
+    baseDealer = defect.gravite === 'mineure' ? 380 : 1350;
+  } else if (/injecteur|carburant|admission|turbo/i.test(txt)) {
+    organGroup = 'injection';
+    baseIndep = defect.gravite === 'mineure' ? 220 : 750;
+    baseDealer = defect.gravite === 'mineure' ? 350 : 1150;
+  } else if (/Ã©chappement|echappement|opacitÃ©|fap|particule|adblue|nox/i.test(txt)) {
+    organGroup = 'depollution';
+    baseIndep = defect.gravite === 'mineure' ? 180 : 700;
+    baseDealer = defect.gravite === 'mineure' ? 280 : 1100;
+  } else if (/embrayage|bo[iÃ®]te|transmission|cardan/i.test(txt)) {
+    organGroup = 'transmission';
+    baseIndep = defect.gravite === 'mineure' ? 200 : 800;
+    baseDealer = defect.gravite === 'mineure' ? 320 : 1200;
+  } else if (/frein|disque|plaquette|amortisseur|rotule|suspension|pneu/i.test(txt)) {
+    organGroup = 'liaison_sol';
+    baseIndep = defect.gravite === 'mineure' ? 150 : 450;
+    baseDealer = defect.gravite === 'mineure' ? 240 : 680;
+  }
+
+  return { organGroup, costIndep: baseIndep, costDealer: baseDealer };
+}
+
+export function computeCritAir(
+  extraction: VehicleExtraction
+): EngineEvaluationResult['critAir'] {
+  const motorText = `${extraction.motorisation_texte ?? ''} ${extraction.modele ?? ''}`.toLowerCase();
+  const isDiesel = /diesel|hdi|bluehdi|tdi|dci|cdti|jtd|multijet|d-4d|skyactiv-d/i.test(
+    motorText
+  );
+  const isElectricOrHydrogen =
+    /\b(Ã©lectrique|electrique|ev|100%\s*Ã©lec|hydrogÃ¨ne|hydrogene)\b/i.test(motorText);
+
+  if (isElectricOrHydrogen) {
+    return { vignette: 'Critâ€™Air 0', source: 'estimation_annee' };
+  }
+
+  if (extraction.norme_euro) {
+    const euroMatch = extraction.norme_euro.match(/euro\s*([1-6])/i);
+    if (euroMatch) {
+      const euroNum = Number(euroMatch[1]);
+      if (!isDiesel) {
+        if (euroNum >= 5) return { vignette: 'Critâ€™Air 1', source: 'norme_euro_v9' };
+        if (euroNum === 4) return { vignette: 'Critâ€™Air 2', source: 'norme_euro_v9' };
+        if (euroNum === 2 || euroNum === 3) {
+          return { vignette: 'Critâ€™Air 3', source: 'norme_euro_v9' };
+        }
+      } else {
+        if (euroNum >= 5) return { vignette: 'Critâ€™Air 2', source: 'norme_euro_v9' };
+        if (euroNum === 4) return { vignette: 'Critâ€™Air 3', source: 'norme_euro_v9' };
+        if (euroNum === 3) return { vignette: 'Critâ€™Air 4', source: 'norme_euro_v9' };
+        if (euroNum === 2) return { vignette: 'Critâ€™Air 5', source: 'norme_euro_v9' };
+      }
+    }
+  }
+
+  const year = extraction.annee_mec;
+  if (!year) {
+    return { vignette: 'Non classÃ© / Inconnu', source: 'inconnu' };
+  }
+
+  if (!isDiesel) {
+    if (year >= 2011) return { vignette: 'Critâ€™Air 1', source: 'estimation_annee' };
+    if (year >= 2006) return { vignette: 'Critâ€™Air 2', source: 'estimation_annee' };
+    if (year >= 1997) return { vignette: 'Critâ€™Air 3', source: 'estimation_annee' };
+    return { vignette: 'Non classÃ© / Inconnu', source: 'estimation_annee' };
+  } else {
+    if (year >= 2011) return { vignette: 'Critâ€™Air 2', source: 'estimation_annee' };
+    if (year >= 2006) return { vignette: 'Critâ€™Air 3', source: 'estimation_annee' };
+    if (year >= 2001) return { vignette: 'Critâ€™Air 4', source: 'estimation_annee' };
+    if (year >= 1997) return { vignette: 'Critâ€™Air 5', source: 'estimation_annee' };
+    return { vignette: 'Non classÃ© / Inconnu', source: 'estimation_annee' };
+  }
+}
+
+export function evaluateVehicle(extraction: VehicleExtraction): EngineEvaluationResult {
+  const entretienMentions = Array.isArray(extraction.entretien_mentions)
+    ? extraction.entretien_mentions
+    : [];
+  const defautsUtac = Array.isArray(extraction.defauts_utac) ? extraction.defauts_utac : [];
+
+  const combinedEngineText = `${extraction.marque ?? ''} ${extraction.modele ?? ''} ${
+    extraction.motorisation_texte ?? ''
+  }`.trim();
+  const cnitUpper = (extraction.cnit ?? '').toUpperCase();
+  const hybridDetected = isHybridText(combinedEngineText);
+
+  const alerts: string[] = [];
+  const sellerQuestions: string[] = [];
+
+  // Base 6 -> plancher Ã  10 / 100 pour un vÃ©hicule parfaitement sain
+  let rawScore = 6;
+  let matchedEngineResult: EngineEvaluationResult['matchedEngine'] = null;
+  let intrinsicRisk: {
+    organGroup: OrganGroup;
+    costIndep: number;
+    costDealer: number;
+  } | null = null;
+
+  // 1. Garde-fou Post-OCR (monotonie kilomÃ©trique + confiance)
+  const postOcrValidation = validatePostOcr(extraction);
+  if (postOcrValidation.anomalieCompteurOuOcr && postOcrValidation.anomalieDetail) {
+    rawScore += 32;
+    alerts.push(postOcrValidation.anomalieDetail);
+    sellerQuestions.push(
+      'Une incohÃ©rence chronologique de kilomÃ©trage apparaÃ®t dans les relevÃ©s : pouvez-vous fournir le rapport Histovec complet et lâ€™explication ?'
+    );
+  }
+
+  // 2. CohÃ©rence kilomÃ©trique par rapport Ã  l'Ã¢ge
+  const mileageCheck = evaluateMileageConsistency(extraction);
+  if (mileageCheck.status === 'suspicious_low') {
+    rawScore += 16;
+    if (mileageCheck.note) alerts.push(mileageCheck.note);
+    sellerQuestions.push(
+      'Le kilomÃ©trage est faible par rapport Ã  lâ€™annÃ©e du vÃ©hicule : pouvez-vous fournir lâ€™historique complet des contrÃ´les techniques et factures ?'
+    );
+  } else if (mileageCheck.status === 'high_mileage') {
+    rawScore += 10;
+    if (mileageCheck.note) alerts.push(mileageCheck.note);
+  }
+
+  // 3. Matrice Moteurs
+  for (const rule of ENGINE_RULES) {
+    if (rule.excludeHybrid && hybridDetected) {
+      continue;
+    }
+
+    const matchesKeyword = combinedEngineText ? rule.matchKeywords.test(combinedEngineText) : false;
+    const matchesCnit =
+      !postOcrValidation.cnitFallbackToManualEngine && rule.cnitPrefixes
+        ? rule.cnitPrefixes.some((prefix) => cnitUpper.startsWith(prefix))
+        : false;
+
+    if (matchesKeyword || matchesCnit) {
+      const hinge = evaluateHingeStatus(rule, extraction.annee_mec, extraction.mois_mec);
+      const proof = hasPositiveMaintenanceProof(entretienMentions, rule.relatedElements);
+
+      matchedEngineResult = {
+        id: rule.id,
+        label: rule.label,
+        hingeStatus: hinge.status,
+        hingeNote: hinge.note,
+      };
+
+      if (hinge.note) {
+        alerts.push(hinge.note);
+      }
+
+      if (proof.hasToDo || proof.hasDefect) {
+        rawScore += 28;
+        intrinsicRisk = {
+          organGroup: rule.organGroup,
+          costIndep: rule.costIndep,
+          costDealer: rule.costDealer,
+        };
+        alerts.push(`${rule.label} : intervention ou dÃ©faut signalÃ© (${rule.riskTitle}).`);
+        sellerQuestions.push(
+          `Pouvez-vous prÃ©ciser lâ€™historique et le devis/facture concernant : ${rule.label} ?`
+        );
+      } else if (proof.hasInvoiceProof) {
+        rawScore += 4;
+      } else if (proof.hasDeclaredProof) {
+        rawScore += 14;
+        intrinsicRisk = {
+          organGroup: rule.organGroup,
+          costIndep: Math.round(rule.costIndep * 0.5),
+          costDealer: Math.round(rule.costDealer * 0.5),
+        };
+        sellerQuestions.push(
+          `Lâ€™entretien liÃ© Ã  (${rule.label}) est mentionnÃ© : avez-vous la facture dÃ©taillÃ©e Ã  transmettre ?`
+        );
+      } else if (hinge.status === 'critical_before_fix' || hinge.status === 'hinge_to_verify') {
+        rawScore += 22;
+        intrinsicRisk = {
+          organGroup: rule.organGroup,
+          costIndep: rule.costIndep,
+          costDealer: rule.costDealer,
+        };
+        alerts.push(`${rule.riskTitle}.`);
+        sellerQuestions.push(
+          `Quel est lâ€™historique dâ€™entretien exact de ce moteur (${rule.label}) et y a-t-il des factures ?`
+        );
+      }
+
+      break;
+    }
+  }
+
+  // 4. DÃ©fauts UTAC avec dÃ©duplication de main-d'Å“uvre
+  let totalIndep = intrinsicRisk ? intrinsicRisk.costIndep : 0;
+  let totalDealer = intrinsicRisk ? intrinsicRisk.costDealer : 0;
+
+  for (const defect of defautsUtac) {
+    const mapped = mapUtacDefectToOrganAndCost(defect);
+    const weight = defect.gravite === 'critique' ? 24 : defect.gravite === 'majeure' ? 14 : 5;
+    rawScore += weight;
+
+    if (defect.gravite !== 'mineure') {
+      alerts.push(
+        `DÃ©faut CT (${defect.gravite}) : ${defect.libelle}${defect.code ? ` [${defect.code}]` : ''}.`
+      );
+    }
+
+    if (intrinsicRisk && mapped.organGroup === intrinsicRisk.organGroup) {
+      totalIndep =
+        Math.max(totalIndep, mapped.costIndep) + Math.min(totalIndep, mapped.costIndep) * 0.2;
+      totalDealer =
+        Math.max(totalDealer, mapped.costDealer) + Math.min(totalDealer, mapped.costDealer) * 0.2;
+    } else {
+      totalIndep += mapped.costIndep;
+      totalDealer += mapped.costDealer;
+    }
+  }
+
+  // 5. Mentions d'entretien additionnelles
+  for (const mention of entretienMentions) {
+    if (mention.statut === 'defaut_signale') {
+      rawScore += 18;
+      alerts.push(
+        `DÃ©faut signalÃ© sur lâ€™Ã©lÃ©ment : ${mention.element}${
+          mention.detail ? ` (${mention.detail})` : ''
+        }.`
+      );
+    } else if (mention.statut === 'a_prevoir') {
+      rawScore += 10;
+    }
+  }
+
+  // 6. Courbe asymptotique bornÃ©e entre 0 et 100
+  const clampedRaw = Math.max(0, rawScore);
+  const scoreRisque = Math.min(100, Math.round(100 * (1 - Math.exp(-clampedRaw / 55))));
+
+  let verdict: EngineEvaluationResult['verdict'] = 'FAVORABLE';
+  if (
+    scoreRisque >= 60 ||
+    postOcrValidation.anomalieCompteurOuOcr ||
+    defautsUtac.some((d) => d.gravite === 'critique')
+  ) {
+    verdict = 'RISQUE_ELEVE';
+  } else if (scoreRisque >= 30 || alerts.length > 0) {
+    verdict = 'VIGILANCE';
+  }
+
+  return {
+    matchedEngine: matchedEngineResult,
+    mileageCheck,
+    postOcrValidation,
+    scoreRisque,
+    verdict,
+    estimatedRepairCost: {
+      independant: Math.round(totalIndep / 10) * 10,
+      concession: Math.round(totalDealer / 10) * 10,
+    },
+    critAir: computeCritAir(extraction),
+    alerts,
+    sellerQuestions,
+  };
+}
+
+==========================================
+FICHIER : lib/fileProcessor.ts
+==========================================
+import imageCompression from 'browser-image-compression';
+
+export type ProcessedUpload =
+  | {
+      kind: 'image';
+      fileName: string;
+      sizeKb: number;
+      imageDataUrl: string;
+    }
+  | {
+      kind: 'pdf';
+      fileName: string;
+      sizeKb: number;
+      pdfText: string;
+      pdfPageCount: number;
+    };
+
+export async function normalizeMobileFile(file: File): Promise<File> {
+  const isHeic =
+    file.type === 'image/heic' ||
+    file.type === 'image/heif' ||
+    /\.(heic|heif)$/i.test(file.name);
+
+  if (!isHeic) return file;
+
+  // Garde-fou OOM mobile : rejeter les fichiers HEIC/RAW massifs (> 25 Mo)
+  if (file.size > 25 * 1024 * 1024) {
+    throw new Error(
+      'Fichier HEIC trop volumineux (> 25 Mo). Compresse-le ou capture une photo plus lÃ©gÃ¨re.'
+    );
+  }
+
+  const heic2any = (await import('heic2any')).default;
+  const convertedBlob = await heic2any({
+    blob: file,
+    toType: 'image/jpeg',
+    quality: 0.75,
+  });
+
+  const singleBlob = Array.isArray(convertedBlob) ? convertedBlob[0] : convertedBlob;
+  return new File([singleBlob], file.name.replace(/\.(heic|heif)$/i, '.jpg'), {
+    type: 'image/jpeg',
+  });
+}
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        resolve(reader.result);
+      } else {
+        reject(new Error('Impossible de lire le fichier image.'));
+      }
+    };
+    reader.onerror = () => reject(new Error('Erreur de lecture du fichier.'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function extractTextFromPdf(file: File): Promise<{
+  text: string;
+  pageCount: number;
+}> {
+  const pdfjsLib = await import('pdfjs-dist');
+
+  if (typeof window !== 'undefined' && pdfjsLib.GlobalWorkerOptions) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+  }
+
+  const arrayBuffer = await file.arrayBuffer();
+  const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+  const pdf = await loadingTask.promise;
+  const pageCount = pdf.numPages;
+
+  const pagesText: string[] = [];
+  const maxPages = Math.min(pageCount, 20);
+
+  for (let i = 1; i <= maxPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    const strings = content.items
+      .map((item) => ('str' in item ? item.str : ''))
+      .filter(Boolean);
+    pagesText.push(`--- Page ${i} ---\n${strings.join(' ')}`);
+  }
+
+  return {
+    text: pagesText.join('\n\n'),
+    pageCount,
+  };
+}
+
+export async function processUploadedFile(file: File): Promise<ProcessedUpload> {
+  const isPdf =
+    file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+
+  if (isPdf) {
+    const { text, pageCount } = await extractTextFromPdf(file);
+    const sizeKb = Math.max(1, Math.round(file.size / 1024));
+    return {
+      kind: 'pdf',
+      fileName: file.name,
+      sizeKb,
+      pdfText: text,
+      pdfPageCount: pageCount,
+    };
+  }
+
+  const normalizedFile = await normalizeMobileFile(file);
+
+  const compressedFile = await imageCompression(normalizedFile, {
+    maxSizeMB: 1.2,
+    maxWidthOrHeight: 1600,
+    useWebWorker: true,
+    fileType: 'image/jpeg',
+    initialQuality: 0.82,
+  });
+
+  const imageDataUrl = await blobToDataUrl(compressedFile);
+  const sizeKb = Math.max(1, Math.round(compressedFile.size / 1024));
+
+  return {
+    kind: 'image',
+    fileName: normalizedFile.name,
+    sizeKb,
+    imageDataUrl,
+  };
+}
+
+==========================================
+FICHIER : lib/geminiExtractor.ts
+==========================================
+import { GoogleGenAI, Type, Schema } from '@google/genai';
+
+export type MaintenanceStatus =
+  | 'fait_avec_facture'
+  | 'fait_declare'
+  | 'a_prevoir'
+  | 'defaut_signale';
+
+export type ConfidenceLevel = 'high' | 'medium' | 'low';
+
+export interface MaintenanceMention {
+  element:
+    | 'distribution'
+    | 'courroie'
+    | 'chaine'
+    | 'crepine'
+    | 'adblue'
+    | 'injecteur'
+    | 'embrayage'
+    | 'turbo'
+    | 'autre';
+  statut: MaintenanceStatus;
+  detail?: string;
+}
+
+export interface UtacDefect {
+  code?: string;
+  libelle: string;
+  gravite: 'mineure' | 'majeure' | 'critique';
+}
+
+export interface MileageReading {
+  source: 'histovec' | 'ct' | 'annonce' | 'facture' | 'autre';
+  date: string | null; // Format privilÃ©giÃ© YYYY-MM-DD ou MM/YYYY
+  km: number;
+}
+
+export interface VehicleExtraction {
+  marque: string | null;
+  modele: string | null;
+  motorisation_texte: string | null;
+  cnit: string | null;
+  vin: string | null;
+  mois_mec: number | null;
+  annee_mec: number | null;
+  kilometrage_km: number | null;
+  norme_euro: string | null;
+  releves_kilometrage: MileageReading[];
+  entretien_mentions: MaintenanceMention[];
+  defauts_utac: UtacDefect[];
+  confidence: {
+    motorisation: ConfidenceLevel;
+    cnit: ConfidenceLevel;
+    vin: ConfidenceLevel;
+    date_mec: ConfidenceLevel;
+    kilometrage: ConfidenceLevel;
+  };
+}
+
+const extractionSchema: Schema = {
+  type: Type.OBJECT,
+  properties: {
+    marque: { type: Type.STRING, nullable: true },
+    modele: { type: Type.STRING, nullable: true },
+    motorisation_texte: { type: Type.STRING, nullable: true },
+    cnit: { type: Type.STRING, nullable: true },
+    vin: { type: Type.STRING, nullable: true },
+    mois_mec: { type: Type.INTEGER, nullable: true },
+    annee_mec: { type: Type.INTEGER, nullable: true },
+    kilometrage_km: { type: Type.INTEGER, nullable: true },
+    norme_euro: { type: Type.STRING, nullable: true },
+    releves_kilometrage: {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          source: {
+            type: Type.STRING,
+            enum: ['histovec', 'ct', 'annonce', 'facture', 'autre'],
+          },
+          date: { type: Type.STRING, nullable: true },
+          km: { type: Type.INTEGER },
+        },
+        required: ['source', 'km'],
+      },
+    },
+    entretien_mentions: {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          element: {
+            type: Type.STRING,
+            enum: [
+              'distribution',
+              'courroie',
+              'chaine',
+              'crepine',
+              'adblue',
+              'injecteur',
+              'embrayage',
+              'turbo',
+              'autre',
+            ],
+          },
+          statut: {
+            type: Type.STRING,
+            enum: ['fait_avec_facture', 'fait_declare', 'a_prevoir', 'defaut_signale'],
+          },
+          detail: { type: Type.STRING, nullable: true },
+        },
+        required: ['element', 'statut'],
+      },
+    },
+    defauts_utac: {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          code: { type: Type.STRING, nullable: true },
+          libelle: { type: Type.STRING },
+          gravite: {
+            type: Type.STRING,
+            enum: ['mineure', 'majeure', 'critique'],
+          },
+        },
+        required: ['libelle', 'gravite'],
+      },
+    },
+    confidence: {
+      type: Type.OBJECT,
+      properties: {
+        motorisation: { type: Type.STRING, enum: ['high', 'medium', 'low'] },
+        cnit: { type: Type.STRING, enum: ['high', 'medium', 'low'] },
+        vin: { type: Type.STRING, enum: ['high', 'medium', 'low'] },
+        date_mec: { type: Type.STRING, enum: ['high', 'medium', 'low'] },
+        kilometrage: { type: Type.STRING, enum: ['high', 'medium', 'low'] },
+      },
+      required: ['motorisation', 'cnit', 'vin', 'date_mec', 'kilometrage'],
+    },
+  },
+  required: ['releves_kilometrage', 'entretien_mentions', 'defauts_utac', 'confidence'],
+};
+
+const SYSTEM_INSTRUCTION = `Tu es un extracteur de donnÃ©es techniques automobiles strict et dÃ©terministe.
+Extrais UNIQUEMENT ce qui est explicitement prÃ©sent dans le document ou l'image fournie. N'invente jamais rien.
+
+RÃ¨gles critiques :
+1. Entretien : ne marque "fait_avec_facture" que si une facture/remplacement effectif est prouvÃ© ou explicitement facturÃ©. Si l'annonce dit "distribution Ã  prÃ©voir" ou "courroie Ã  faire", utilise "a_prevoir". Si un voyant ou une panne est signalÃ©e, utilise "defaut_signale".
+2. Norme Euro : cherche la rubrique V.9 (carte grise / Histovec) ou toute mention explicite de norme Euro (ex. EURO5, EURO6). Sinon laisse null.
+3. Date de premiÃ¨re mise en circulation : sÃ©pare mois_mec (1-12) et annee_mec (4 chiffres).
+4. RelevÃ©s kilomÃ©triques : extrais chaque relevÃ© datÃ© visible dans Histovec, les contrÃ´les techniques ou les factures dans releves_kilometrage (date au format YYYY-MM-DD si possible).
+5. Confiance : Ã©value honnÃªtement la lisibilitÃ© (confidence: high / medium / low) pour motorisation, cnit, vin, date_mec et kilometrage. Si un champ est absent ou illisible sur une photo floue, utilise "low".`;
+
+export async function extractVehicleData(input: {
+  imageDataUrl?: string;
+  pdfText?: string;
+  extraNotes?: string;
+}): Promise<VehicleExtraction> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error('GEMINI_API_KEY manquante dans .env.local');
+  }
+
+  const ai = new GoogleGenAI({ apiKey });
+
+  const contents: Array<string | { inlineData: { data: string; mimeType: string } }> = [];
+
+  if (input.imageDataUrl) {
+    const match = input.imageDataUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+    if (match) {
+      contents.push({
+        inlineData: {
+          mimeType: match[1],
+          data: match[2],
+        },
+      });
+    }
+  }
+
+  let promptText = 'Analyse ce document/visuel automobile et retourne le JSON structurÃ©.';
+  if (input.pdfText) {
+    promptText += `\n\nTexte extrait du PDF :\n${input.pdfText.slice(0, 25000)}`;
+  }
+  if (input.extraNotes) {
+    promptText += `\n\nTexte d'annonce ou notes utilisateur :\n${input.extraNotes.slice(0, 5000)}`;
+  }
+
+  contents.push(promptText);
+
+  const primaryModel = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
+  const fallbackModels = ['gemini-3.5-flash-lite', 'gemini-3.5-flash'].filter(
+    (m) => m !== primaryModel
+  );
+  const modelsToTry = [primaryModel, ...fallbackModels];
+
+  let response: Awaited<ReturnType<typeof ai.models.generateContent>> | null = null;
+  let lastError: unknown = null;
+
+  for (const currentModel of modelsToTry) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        response = await ai.models.generateContent({
+          model: currentModel,
+          contents,
+          config: {
+            temperature: 0.0,
+            systemInstruction: SYSTEM_INSTRUCTION,
+            responseMimeType: 'application/json',
+            responseSchema: extractionSchema,
+          },
+        });
+        break;
+      } catch (err) {
+        lastError = err;
+        const msg = err instanceof Error ? err.message : String(err);
+        const isOverloaded = msg.includes('503') || msg.includes('UNAVAILABLE');
+        if (!isOverloaded || attempt === 1) {
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 600));
+      }
+    }
+    if (response) break;
+  }
+
+  if (!response) {
+    throw lastError instanceof Error
+      ? lastError
+      : new Error('Tous les modÃ¨les Gemini ont Ã©chouÃ©.');
+  }
+
+  const rawText = response.text;
+  if (!rawText) {
+    throw new Error('RÃ©ponse vide de Gemini.');
+  }
+
+  return JSON.parse(rawText) as VehicleExtraction;
+}
+
+==========================================
+FICHIER : lib/magicLink.ts
+==========================================
+import crypto from 'crypto';
+
+export interface MagicLeadPayload {
+  email: string;
+  vehicleHint: string;
+  notes?: string;
+  passUnlocked?: boolean;
+  includeCerfa?: boolean;
+  createdAt: string;
+}
+
+const DEFAULT_SECRET = 'dev-secret-change-in-production-scanner-auto';
+
+function getSecret(): string {
+  return process.env.MAGIC_LINK_SECRET || DEFAULT_SECRET;
+}
+
+export function createMagicToken(payload: MagicLeadPayload): string {
+  const json = JSON.stringify(payload);
+  const dataB64 = Buffer.from(json, 'utf8').toString('base64url');
+  const sig = crypto
+    .createHmac('sha256', getSecret())
+    .update(dataB64)
+    .digest('base64url');
+
+  return `${dataB64}.${sig}`;
+}
+
+export function verifyMagicToken(token: string): MagicLeadPayload | null {
+  if (!token || !token.includes('.')) return null;
+
+  const [dataB64, sig] = token.split('.');
+  if (!dataB64 || !sig) return null;
+
+  const expectedSig = crypto
+    .createHmac('sha256', getSecret())
+    .update(dataB64)
+    .digest('base64url');
+
+  const sigBuf = Buffer.from(sig);
+  const expectedBuf = Buffer.from(expectedSig);
+
+  if (sigBuf.length !== expectedBuf.length) return null;
+  if (!crypto.timingSafeEqual(sigBuf, expectedBuf)) return null;
+
+  try {
+    const raw = Buffer.from(dataB64, 'base64url').toString('utf8');
+    const parsed = JSON.parse(raw) as MagicLeadPayload;
+    if (!parsed.email || !parsed.vehicleHint) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+==========================================
+FICHIER : lib/reportGenerator.ts
+==========================================
+import type { VehicleExtraction } from './geminiExtractor';
+import type { EngineEvaluationResult } from './engineRules';
+
+export interface CerfaAndLitigationPack {
+  cessionAndRegistrationSteps: string[];
+  registeredMailTemplate: string;
+}
+
+export interface FullVehicleReport {
+  vehicleTitle: string;
+  generatedAt: string;
+  executiveSummary: string;
+  negotiationAdvice: {
+    suggestedDiscountIndep: number;
+    suggestedDiscountDealer: number;
+    argumentSummary: string;
+  };
+  inspectionChecklist: string[];
+  sellerMessageScript: string;
+  cerfaAndLitigationPack: CerfaAndLitigationPack;
+  legalDisclaimers: {
+    notAnExpertNotice: string;
+    withdrawalWaiverText: string;
+  };
+}
+
+export function buildFullReport(
+  extraction: VehicleExtraction,
+  evaluation: EngineEvaluationResult
+): FullVehicleReport {
+  const marque = extraction.marque ?? 'VÃ©hicule';
+  const modele = extraction.modele ?? '';
+  const motor = extraction.motorisation_texte ?? 'Motorisation non prÃ©cisÃ©e';
+  const mec = extraction.annee_mec
+    ? extraction.mois_mec
+      ? `${String(extraction.mois_mec).padStart(2, '0')}/${extraction.annee_mec}`
+      : `${extraction.annee_mec}`
+    : 'Date inconnue';
+  const kmText =
+    typeof extraction.kilometrage_km === 'number'
+      ? `${extraction.kilometrage_km.toLocaleString('fr-FR')} km`
+      : 'KilomÃ©trage non prÃ©cisÃ©';
+
+  const vehicleTitle = `${marque} ${modele} â€” ${motor} (${mec}, ${kmText})`.trim();
+
+  const executiveSummary =
+    evaluation.verdict === 'RISQUE_ELEVE'
+      ? `Dossier Ã  fort niveau de vigilance (score ${evaluation.scoreRisque}/100). Des Ã©lÃ©ments techniques ou documentaires nÃ©cessitent une vÃ©rification stricte des preuves dâ€™entretien et une marge de nÃ©gociation avant tout engagement.`
+      : evaluation.verdict === 'VIGILANCE'
+        ? `Dossier nÃ©cessitant de la vigilance (score ${evaluation.scoreRisque}/100). Le vÃ©hicule prÃ©sente des points Ã  contrÃ´ler ou Ã  chiffrer avant achat, particuliÃ¨rement sur la remise Ã  niveau estimÃ©e.`
+        : `Dossier globalement favorable (score ${evaluation.scoreRisque}/100) sur les Ã©lÃ©ments analysÃ©s, sous rÃ©serve de vÃ©rifier les documents officiels et lâ€™historique dâ€™entretien.`;
+
+  const suggestedDiscountIndep = evaluation.estimatedRepairCost.independant;
+  const suggestedDiscountDealer = evaluation.estimatedRepairCost.concession;
+
+  const argumentSummary =
+    suggestedDiscountIndep > 0
+      ? `Base de nÃ©gociation suggÃ©rÃ©e : entre ${suggestedDiscountIndep} â‚¬ (rÃ©seau indÃ©pendant) et ${suggestedDiscountDealer} â‚¬ (rÃ©seau constructeur) de remise ou prise en charge avant achat, selon justificatifs fournis.`
+      : `Aucun poste de rÃ©paration majeur chiffrÃ© automatiquement Ã  ce stade ; base nÃ©gociation sur lâ€™Ã©tat rÃ©el constatÃ© lors de lâ€™essai et lâ€™historique des factures.`;
+
+  const inspectionChecklist: string[] = [
+    'VÃ©rifier la concordance stricte entre le VIN / numÃ©ro de sÃ©rie sur le pare-brise ou chÃ¢ssis, la carte grise et le rapport Histovec.',
+    'Demander lâ€™intÃ©gralitÃ© des factures dâ€™entretien (piÃ¨ces et main-dâ€™Å“uvre) et les procÃ¨s-verbaux de contrÃ´le technique.',
+    'Ã€ froid (moteur non dÃ©marrÃ© avant votre arrivÃ©e), contrÃ´ler le niveau et lâ€™aspect de lâ€™huile ainsi que lâ€™absence de fumÃ©e ou bruit anormal au dÃ©marrage.',
+    'Lors de lâ€™essai routier : tester le freinage en ligne droite, lâ€™absence de vibrations au volant, le passage des rapports et lâ€™absence de voyant moteur/antipollution.',
+  ];
+
+  if (evaluation.matchedEngine?.id === 'psa_1_2_puretech_eb2') {
+    inspectionChecklist.push(
+      'SpÃ©cifique 1.2 PureTech : demander la facture attestant du contrÃ´le ou du remplacement de la courroie et du nettoyage de la crÃ©pine, ainsi que le respect de lâ€™huile prÃ©conisÃ©e.'
+    );
+  }
+
+  if (evaluation.mileageCheck.status === 'suspicious_low') {
+    inspectionChecklist.push(
+      'CohÃ©rence kilomÃ©trique : croiser chaque relevÃ© kilomÃ©trique avec les dates des contrÃ´les techniques et factures dâ€™entretien.'
+    );
+  }
+
+  const questionsBlock =
+    evaluation.sellerQuestions.length > 0
+      ? evaluation.sellerQuestions.map((q) => `- ${q}`).join('\n')
+      : '- Pouvez-vous me transmettre le rapport Histovec complet ainsi que le dernier contrÃ´le technique ?\n- Avez-vous lâ€™historique des factures dâ€™entretien ?';
+
+  const sellerMessageScript = `Bonjour, je suis intÃ©ressÃ© par votre annonce (${vehicleTitle}). Avant de me dÃ©placer, pourriez-vous me prÃ©ciser :\n${questionsBlock}\nMerci dâ€™avance pour votre retour.`;
+
+  const cessionAndRegistrationSteps: string[] = [
+    '1. Avant le paiement : exiger un certificat de non-gage / situation administrative rÃ©cent et vÃ©rifier lâ€™identitÃ© du vendeur sur la carte grise.',
+    '2. Le jour de la vente : remplir ensemble le formulaire Cerfa nÂ° 15776*02 (dÃ©claration de cession) en deux exemplaires, barrer la carte grise avec la mention "Vendu le [date] Ã  [heure]" et signer.',
+    '3. Code de cession : demander au vendeur le code de cession remis aprÃ¨s lâ€™enregistrement de la cession (ou vÃ©rifier lâ€™enregistrement sur France Titres / ANTS).',
+    '4. Immatriculation : effectuer la demande de certificat dâ€™immatriculation Ã  votre nom dans un dÃ©lai dâ€™1 mois maximum avec justificatif dâ€™identitÃ©, justificatif de domicile, assurance et contrÃ´le technique valide.',
+  ];
+
+  const registeredMailTemplate = `Objet : RÃ©clamation relative Ã  lâ€™achat du vÃ©hicule ${vehicleTitle} â€” Lettre recommandÃ©e avec avis de rÃ©ception
+
+Madame, Monsieur [Nom du vendeur],
+
+En date du [Date dâ€™achat], je me suis portÃ©(e) acquÃ©reur auprÃ¨s de vous du vÃ©hicule ${vehicleTitle} (immatriculÃ© [NumÃ©ro dâ€™immatriculation] / VIN : [VIN le cas Ã©chÃ©ant]), au prix de [Prix dâ€™achat] â‚¬.
+
+Ã€ la suite de lâ€™achat / des contrÃ´les effectuÃ©s, jâ€™ai constatÃ© la situation suivante : [DÃ©crire prÃ©cisÃ©ment le problÃ¨me constatÃ©, les symptÃ´mes, la date dâ€™apparition et le kilomÃ©trage actuel].
+
+Ces Ã©lÃ©ments nâ€™avaient pas Ã©tÃ© portÃ©s Ã  ma connaissance de maniÃ¨re claire avant la transaction et affectent lâ€™usage normal ou la valeur du vÃ©hicule (notamment au regard des dispositions des articles 1641 et suivants du Code civil relatives Ã  la garantie des vices cachÃ©s, ou de lâ€™obligation de dÃ©livrance conforme).
+
+Je vous joins Ã  ce courrier : [Lister les piÃ¨ces jointes : copie de la carte grise, certificat de cession Cerfa, devis/facture de diagnostic ou rÃ©paration, photos/relevÃ©s].
+
+En consÃ©quence, je vous mets en demeure de me faire connaÃ®tre sous un dÃ©lai de [15 jours] votre proposition amiable (prise en charge des rÃ©parations estimÃ©es Ã  [Montant] â‚¬, rÃ©duction du prix ou rÃ©solution de la vente). Ã€ dÃ©faut de retour satisfaisant dans ce dÃ©lai, je me rÃ©serve le droit de saisir mon assurance protection juridique et les juridictions compÃ©tentes.
+
+Veuillez agrÃ©er, Madame, Monsieur, lâ€™expression de mes salutations distinguÃ©es.
+
+[PrÃ©nom Nom]
+[Adresse postale]
+[TÃ©lÃ©phone / Email]
+[Signature]`;
+
+  return {
+    vehicleTitle,
+    generatedAt: new Date().toISOString(),
+    executiveSummary,
+    negotiationAdvice: {
+      suggestedDiscountIndep,
+      suggestedDiscountDealer,
+      argumentSummary,
+    },
+    inspectionChecklist,
+    sellerMessageScript,
+    cerfaAndLitigationPack: {
+      cessionAndRegistrationSteps,
+      registeredMailTemplate,
+    },
+    legalDisclaimers: {
+      notAnExpertNotice:
+        'Outil dâ€™aide Ã  la dÃ©cision fondÃ© sur lâ€™analyse automatisÃ©e de donnÃ©es et documents fournis. Ne constitue en aucun cas une expertise automobile rÃ©glementÃ©e au sens de lâ€™article L. 326-1 du Code de la route.',
+      withdrawalWaiverText:
+        'Je demande lâ€™exÃ©cution immÃ©diate de la prestation numÃ©rique et renonce expressÃ©ment Ã  mon droit de rÃ©tractation de 14 jours conformÃ©ment Ã  lâ€™article L. 221-28 13Â° du Code de la consommation.',
+    },
+  };
+}
+
+==========================================
+FICHIER : next.config.ts
+==========================================
+import type { NextConfig } from "next";
+
+const nextConfig: NextConfig = {
+  /* config options here */
+  experimental: {
+    agentFeedback: true,
+  },
+  cacheComponents: true,
+  partialPrefetching: true,
+  turbopack: {
+    rules: {
+      "*.css": {
+        loaders: ["@tailwindcss/turbopack"],
+        as: "*.css",
+      },
+    },
+  },
+};
+
+export default nextConfig;
+
+
+==========================================
+FICHIER : package.json
+==========================================
+{
+  "name": "mon-scanner-auto",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint"
+  },
+  "dependencies": {
+    "@google/genai": "^3.6.1",
+    "browser-image-compression": "^2.0.2",
+    "heic2any": "^0.0.4",
+    "next": "16.4.6",
+    "pdfjs-dist": "^6.5.438",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "resend": "^6.40.0",
+    "stripe": "^23.2.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/turbopack": "4.3.3",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.4.6",
+    "tailwindcss": "4.3.3",
+    "typescript": "^5"
+  }
+}
+
+
+==========================================
+FICHIER : tsconfig.json
+==========================================
+{
+  "compilerOptions": {
+    "target": "ES2017",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "incremental": true,
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
+    "paths": {
+      "@/*": ["./*"]
+    }
+  },
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts",
+    ".next/dev/types/**/*.ts",
+    "**/*.mts"
+  ],
+  "exclude": ["node_modules"]
+}
+
+
