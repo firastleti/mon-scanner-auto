@@ -45,6 +45,7 @@ export interface EngineRule {
   fixMonth: number;
   riskTitle: string;
   riskSummary: string;
+  repairScopeNote: string;
   costIndep: number;
   costDealer: number;
   relatedElements: MaintenanceMention['element'][];
@@ -92,7 +93,9 @@ export const ENGINE_RULES: EngineRule[] = [
     fixMonth: 3,
     riskTitle: 'Dégradation courroie de distribution dans l’huile & encrassement crépine',
     riskSummary:
-      'La courroie immergée peut se dégrader prématurément, boucher la crépine de pompe à huile et provoquer une casse moteur ou une baisse de pression d’huile.',
+      'La courroie immergée peut se dégrader prématurément, boucher la crépine de pompe à huile et provoquer une baisse de pression d’huile, une surconsommation d’huile ou une casse moteur.',
+    repairScopeNote:
+      'Estimation indicative pour contrôle/remplacement du kit distribution, nettoyage de crépine et vidange (hors casse moteur ou turbo).',
     costIndep: 950,
     costDealer: 1450,
     relatedElements: ['distribution', 'courroie', 'crepine'],
@@ -108,6 +111,8 @@ export const ENGINE_RULES: EngineRule[] = [
     riskTitle: 'Usure prématurée de la chaîne d’arbres à cames (7 mm) / tendeur',
     riskSummary:
       'Sur les millésimes avant modification, la chaîne de liaison entre arbres à cames peut s’allonger ou casser, entraînant des dégâts culasse importants.',
+    repairScopeNote:
+      'Estimation indicative pour remplacement kit chaîne/tendeur ou mise à niveau 8 mm (hors réfection culasse/moteur).',
     costIndep: 1150,
     costDealer: 1750,
     relatedElements: ['distribution', 'chaine'],
@@ -123,6 +128,8 @@ export const ENGINE_RULES: EngineRule[] = [
     riskTitle: 'Allongement chaîne de distribution / tendeur & calamine admission',
     riskSummary:
       'Le tendeur de chaîne et l’encrassement de l’admission directe sont à surveiller particulièrement si l’entretien n’a pas été rapproché.',
+    repairScopeNote:
+      'Estimation indicative pour kit chaîne de distribution et nettoyage admission (hors turbo ou réfection moteur).',
     costIndep: 900,
     costDealer: 1400,
     relatedElements: ['distribution', 'chaine', 'turbo'],
@@ -138,6 +145,8 @@ export const ENGINE_RULES: EngineRule[] = [
     riskTitle: 'Surconsommation d’huile moteur & usure chaîne de distribution',
     riskSummary:
       'Les blocs 1.2 TCe antérieurs à la fiabilisation nécessitent une vigilance accrue sur la consommation d’huile, les niveaux et la distribution.',
+    repairScopeNote:
+      'Estimation indicative pour intervention distribution/étanchéité (hors remplacement bloc moteur).',
     costIndep: 1200,
     costDealer: 1850,
     relatedElements: ['chaine', 'turbo', 'autre'],
@@ -153,6 +162,8 @@ export const ENGINE_RULES: EngineRule[] = [
     riskTitle: 'Contrôle circuit d’injection, FAP et périodicité de distribution',
     riskSummary:
       'Vérifier la régularité des vidanges et le remplacement de la courroie de distribution selon l’âge et le kilométrage.',
+    repairScopeNote:
+      'Estimation indicative pour kit distribution/pompe à eau ou contrôle injection.',
     costIndep: 750,
     costDealer: 1150,
     relatedElements: ['courroie', 'distribution', 'injecteur'],
@@ -168,6 +179,8 @@ export const ENGINE_RULES: EngineRule[] = [
     riskTitle: 'Encrassement vanne EGR / FAP et contrôle kit distribution + pompe à eau',
     riskSummary:
       'Sur les trajets courts ou urbains, la vanne EGR et le FAP peuvent s’encrasser ; vérifier également l’échéance distribution/pompe à eau.',
+    repairScopeNote:
+      'Estimation indicative pour kit distribution + pompe à eau ou remise en état EGR/FAP.',
     costIndep: 800,
     costDealer: 1250,
     relatedElements: ['courroie', 'distribution', 'adblue'],
@@ -182,6 +195,8 @@ export const ENGINE_RULES: EngineRule[] = [
     riskTitle: 'Défaillance injecteur / réservoir / pompe AdBlue',
     riskSummary:
       'Les cristallisations d’urée ou pannes de module AdBlue peuvent entraîner un message d’anti-démarrage.',
+    repairScopeNote:
+      'Estimation indicative pour remplacement réservoir/pompe ou injecteur AdBlue.',
     costIndep: 850,
     costDealer: 1350,
     relatedElements: ['adblue'],
@@ -196,33 +211,28 @@ function parseReadingDateToTimestamp(rawDate: string | null): number | null {
   if (!rawDate) return null;
   const trimmed = rawDate.trim();
 
-  // YYYY-MM-DD
   if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
     const ts = Date.parse(trimmed);
     return Number.isNaN(ts) ? null : ts;
   }
 
-  // YYYY-MM
   if (/^\d{4}-\d{2}$/.test(trimmed)) {
     const ts = Date.parse(`${trimmed}-01`);
     return Number.isNaN(ts) ? null : ts;
   }
 
-  // DD/MM/YYYY
   const dmy = trimmed.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
   if (dmy) {
     const ts = Date.parse(`${dmy[3]}-${dmy[2]}-${dmy[1]}`);
     return Number.isNaN(ts) ? null : ts;
   }
 
-  // MM/YYYY
   const my = trimmed.match(/^(\d{2})\/(\d{4})$/);
   if (my) {
     const ts = Date.parse(`${my[2]}-${my[1]}-01`);
     return Number.isNaN(ts) ? null : ts;
   }
 
-  // YYYY
   if (/^\d{4}$/.test(trimmed)) {
     const ts = Date.parse(`${trimmed}-06-01`);
     return Number.isNaN(ts) ? null : ts;
@@ -514,7 +524,6 @@ export function evaluateVehicle(extraction: VehicleExtraction): EngineEvaluation
   const alerts: string[] = [];
   const sellerQuestions: string[] = [];
 
-  // Base 6 -> plancher à 10 / 100 pour un véhicule parfaitement sain
   let rawScore = 6;
   let matchedEngineResult: EngineEvaluationResult['matchedEngine'] = null;
   let intrinsicRisk: {
@@ -546,7 +555,38 @@ export function evaluateVehicle(extraction: VehicleExtraction): EngineEvaluation
     if (mileageCheck.note) alerts.push(mileageCheck.note);
   }
 
-  // 3. Matrice Moteurs
+  // 2 bis. Croisement multi-documents : dérive entre le dernier relevé daté (CT/Histovec) et le km actuel
+  const readings = Array.isArray(extraction.releves_kilometrage)
+    ? extraction.releves_kilometrage
+    : [];
+  const sortedReadings = readings
+    .map((r) => ({ ...r, ts: parseReadingDateToTimestamp(r.date) }))
+    .filter((r): r is MileageReading & { ts: number } => r.ts !== null && typeof r.km === 'number')
+    .sort((a, b) => a.ts - b.ts);
+
+  if (
+    sortedReadings.length > 0 &&
+    typeof extraction.kilometrage_km === 'number' &&
+    !postOcrValidation.anomalieCompteurOuOcr
+  ) {
+    const latest = sortedReadings[sortedReadings.length - 1];
+    const diffKm = extraction.kilometrage_km - latest.km;
+    const elapsedDays = Math.max(1, (Date.now() - latest.ts) / (1000 * 60 * 60 * 24));
+    const annualizedSinceLastReading = Math.round((diffKm / elapsedDays) * 365);
+
+    if (elapsedDays > 180 && annualizedSinceLastReading > 35000) {
+      rawScore += 10;
+      alerts.push(
+        `Croisement CT/Annonce : progression rapide depuis le dernier relevé (${latest.km.toLocaleString(
+          'fr-FR'
+        )} km le ${latest.date} -> ${extraction.kilometrage_km.toLocaleString(
+          'fr-FR'
+        )} km actuels, soit ~${annualizedSinceLastReading.toLocaleString('fr-FR')} km/an).`
+      );
+    }
+  }
+
+  // 3. Matrice Moteurs avec pondération dynamique selon l'absence de facture, l'âge et le kilométrage
   for (const rule of ENGINE_RULES) {
     if (rule.excludeHybrid && hybridDetected) {
       continue;
@@ -561,6 +601,9 @@ export function evaluateVehicle(extraction: VehicleExtraction): EngineEvaluation
     if (matchesKeyword || matchesCnit) {
       const hinge = evaluateHingeStatus(rule, extraction.annee_mec, extraction.mois_mec);
       const proof = hasPositiveMaintenanceProof(entretienMentions, rule.relatedElements);
+      const kmVal = extraction.kilometrage_km ?? 0;
+      const isBeforeFix =
+        hinge.status === 'critical_before_fix' || hinge.status === 'hinge_to_verify';
 
       matchedEngineResult = {
         id: rule.id,
@@ -574,38 +617,51 @@ export function evaluateVehicle(extraction: VehicleExtraction): EngineEvaluation
       }
 
       if (proof.hasToDo || proof.hasDefect) {
-        rawScore += 28;
+        const exposureBonus = isBeforeFix && kmVal >= 60000 ? 12 : 4;
+        rawScore += 32 + exposureBonus;
         intrinsicRisk = {
           organGroup: rule.organGroup,
           costIndep: rule.costIndep,
           costDealer: rule.costDealer,
         };
-        alerts.push(`${rule.label} : intervention ou défaut signalé (${rule.riskTitle}).`);
+        alerts.push(
+          `${rule.label} : intervention à prévoir ou défaut signalé (${rule.riskTitle}). ${rule.repairScopeNote}`
+        );
         sellerQuestions.push(
           `Pouvez-vous préciser l’historique et le devis/facture concernant : ${rule.label} ?`
         );
       } else if (proof.hasInvoiceProof) {
-        rawScore += 4;
+        rawScore += 6;
+        alerts.push(
+          `${rule.label} : justificatif d’intervention relevé (vérifier date, kilométrage et détail des pièces sur la facture).`
+        );
       } else if (proof.hasDeclaredProof) {
-        rawScore += 14;
+        const exposureBonus = isBeforeFix && kmVal >= 60000 ? 10 : 0;
+        rawScore += 22 + exposureBonus;
         intrinsicRisk = {
           organGroup: rule.organGroup,
-          costIndep: Math.round(rule.costIndep * 0.5),
-          costDealer: Math.round(rule.costDealer * 0.5),
+          costIndep: Math.round(rule.costIndep * 0.65),
+          costDealer: Math.round(rule.costDealer * 0.65),
         };
+        alerts.push(
+          `${rule.label} : entretien déclaré sans facture jointe (${rule.repairScopeNote}).`
+        );
         sellerQuestions.push(
           `L’entretien lié à (${rule.label}) est mentionné : avez-vous la facture détaillée à transmettre ?`
         );
-      } else if (hinge.status === 'critical_before_fix' || hinge.status === 'hinge_to_verify') {
-        rawScore += 22;
+      } else if (isBeforeFix) {
+        const exposureBonus = kmVal >= 75000 ? 14 : kmVal >= 50000 ? 8 : 0;
+        rawScore += 28 + exposureBonus;
         intrinsicRisk = {
           organGroup: rule.organGroup,
           costIndep: rule.costIndep,
           costDealer: rule.costDealer,
         };
-        alerts.push(`${rule.riskTitle}.`);
+        alerts.push(
+          `${rule.riskTitle} — aucun justificatif d’entretien détecté à ce stade. ${rule.repairScopeNote}`
+        );
         sellerQuestions.push(
-          `Quel est l’historique d’entretien exact de ce moteur (${rule.label}) et y a-t-il des factures ?`
+          `Quel est l’historique d’entretien exact de ce moteur (${rule.label}) et avez-vous les factures correspondantes ?`
         );
       }
 
@@ -613,16 +669,19 @@ export function evaluateVehicle(extraction: VehicleExtraction): EngineEvaluation
     }
   }
 
-  // 4. Défauts UTAC avec déduplication de main-d'œuvre
+  // 4. Défauts UTAC avec déduplication de main-d'œuvre + signal sur défauts mineurs multiples
   let totalIndep = intrinsicRisk ? intrinsicRisk.costIndep : 0;
   let totalDealer = intrinsicRisk ? intrinsicRisk.costDealer : 0;
+  let minorDefectsCount = 0;
 
   for (const defect of defautsUtac) {
     const mapped = mapUtacDefectToOrganAndCost(defect);
     const weight = defect.gravite === 'critique' ? 24 : defect.gravite === 'majeure' ? 14 : 5;
     rawScore += weight;
 
-    if (defect.gravite !== 'mineure') {
+    if (defect.gravite === 'mineure') {
+      minorDefectsCount += 1;
+    } else {
       alerts.push(
         `Défaut CT (${defect.gravite}) : ${defect.libelle}${defect.code ? ` [${defect.code}]` : ''}.`
       );
@@ -637,6 +696,12 @@ export function evaluateVehicle(extraction: VehicleExtraction): EngineEvaluation
       totalIndep += mapped.costIndep;
       totalDealer += mapped.costDealer;
     }
+  }
+
+  if (minorDefectsCount >= 3) {
+    alerts.push(
+      `Contrôle technique : ${minorDefectsCount} défaillances mineures relevées (usure globale à chiffrer à moyen terme).`
+    );
   }
 
   // 5. Mentions d'entretien additionnelles

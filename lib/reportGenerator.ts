@@ -55,19 +55,19 @@ export function buildFullReport(
 
   const argumentSummary =
     suggestedDiscountIndep > 0
-      ? `Base de négociation suggérée : entre ${suggestedDiscountIndep} € (réseau indépendant) et ${suggestedDiscountDealer} € (réseau constructeur) de remise ou prise en charge avant achat, selon justificatifs fournis.`
+      ? `Base de négociation suggérée : entre ${suggestedDiscountIndep} € (réseau indépendant) et ${suggestedDiscountDealer} € (réseau constructeur) de remise ou prise en charge avant achat pour la remise à niveau préventive identifiée (hors casse moteur/turbo), selon justificatifs fournis.`
       : `Aucun poste de réparation majeur chiffré automatiquement à ce stade ; base négociation sur l’état réel constaté lors de l’essai et l’historique des factures.`;
 
   const inspectionChecklist: string[] = [
     'Vérifier la concordance stricte entre le VIN / numéro de série sur le pare-brise ou châssis, la carte grise et le rapport Histovec.',
-    'Demander l’intégralité des factures d’entretien (pièces et main-d’œuvre) et les procès-verbaux de contrôle technique.',
-    'À froid (moteur non démarré avant votre arrivée), contrôler le niveau et l’aspect de l’huile ainsi que l’absence de fumée ou bruit anormal au démarrage.',
+    'Demander l’intégralité des factures d’entretien datées et kilométrées (pièces et main-d’œuvre) ainsi que les procès-verbaux de contrôle technique.',
+    'À froid (moteur non démarré avant votre arrivée), contrôler le niveau et l’aspect de l’huile (jauge) ainsi que l’absence de fumée ou bruit suspect au démarrage.',
     'Lors de l’essai routier : tester le freinage en ligne droite, l’absence de vibrations au volant, le passage des rapports et l’absence de voyant moteur/antipollution.',
   ];
 
   if (evaluation.matchedEngine?.id === 'psa_1_2_puretech_eb2') {
     inspectionChecklist.push(
-      'Spécifique 1.2 PureTech : demander la facture attestant du contrôle ou du remplacement de la courroie et du nettoyage de la crépine, ainsi que le respect de l’huile préconisée.'
+      'Spécifique 1.2 PureTech : vérifier à froid le niveau d’huile exact, demander le carnet et les factures datées/kilométrées prouvant le respect de la périodicité d’entretien et de l’huile préconisée, ainsi que tout contrôle ou remplacement de courroie/crépine.'
     );
   }
 
@@ -103,14 +103,17 @@ Ces éléments n’avaient pas été portés à ma connaissance de manière clai
 
 Je vous joins à ce courrier : [Lister les pièces jointes : copie de la carte grise, certificat de cession Cerfa, devis/facture de diagnostic ou réparation, photos/relevés].
 
-En conséquence, je vous mets en demeure de me faire connaître sous un délai de [15 jours] votre proposition amiable (prise en charge des réparations estimées à [Montant] €, réduction du prix ou résolution de la vente). À défaut de retour satisfaisant dans ce délai, je me réserve le droit de saisir mon assurance protection juridique et les juridictions compétentes.
+En conséquence, je vous mets en demeure de me faire connaître sous un délai de [15 jours — adapter selon la situation] votre proposition amiable (prise en charge des réparations estimées à [Montant] €, réduction du prix ou résolution de la vente). À défaut de retour satisfaisant dans ce délai, je me réserve le droit de saisir mon assurance protection juridique et les juridictions compétentes.
 
 Veuillez agréer, Madame, Monsieur, l’expression de mes salutations distinguées.
 
 [Prénom Nom]
 [Adresse postale]
 [Téléphone / Email]
-[Signature]`;
+[Signature]
+
+---
+Note informative : Ce modèle est fourni à titre purement documentaire et ne constitue pas un conseil juridique personnalisé. En matière de vice caché, la charge de la preuve (constat, diagnostic ou expertise contradictoire) est déterminante ; rapprochez-vous de votre protection juridique ou d’un avocat avant envoi.`;
 
   return {
     vehicleTitle,
